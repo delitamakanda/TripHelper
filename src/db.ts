@@ -46,7 +46,7 @@ export class TripHelperDB extends Dexie {
     constructor() {
         super('TripHelperDB');
         this.version(1).stores({
-            checklist: 'id, day, item,',
+            checklist: 'id, day, item',
             expenses: 'id, day',
         });
 
