@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { db } from './db'
 import { Button, Input } from 'react-aria-components'
+import { DateRangeCreator} from "./components/date-range-creator/date-range-creator.tsx";
 import { Card, CardContent } from './components/card/Card'
 import './App.css'
 import { formatDayLabel } from './utils/formatter'
@@ -70,6 +71,7 @@ function App() {
           <Card>
               <CardContent className="space-y-3">
                   <h2 className="text-lg font-semibold">🗓️ Créer plusieurs jours d'affilée</h2>
+                  <DateRangeCreator onCreate={(days) => setItinerary(prev => [...prev, ...days])} />
               </CardContent>
           </Card>
 
