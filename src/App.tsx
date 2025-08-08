@@ -5,6 +5,7 @@ import { DateRangeCreator} from "./components/date-range-creator/date-range-crea
 import { Card, CardContent } from './components/card/Card'
 import './App.css'
 import { formatDayLabel } from './utils/formatter'
+import { saveAs } from 'file-saver'
 
 const initialItinerary = import.meta.env.DEV ? [
     {
