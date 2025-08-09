@@ -12,6 +12,9 @@ export default defineConfig({
       VitePWA({
           registerType: 'autoUpdate',
           includeAssets: ['favicon.ico', 'pwa-192x192.png', 'pwa-512x512.png'],
+          devOptions: {
+              enabled: true
+          },
           manifest: {
               name: 'Trip Helper',
               short_name: 'Trip Helper',
@@ -34,12 +37,39 @@ export default defineConfig({
                       sizes: '512x512',
                       type: 'image/png',
                   },
+                  {
+                      src: '/pwa-maskable-192x192.png',
+                      sizes: '192x192',
+                      type: 'image/png',
+                      purpose: "maskable",
+                  },
+                  {
+                      src: '/pwa-maskable-512x512.png',
+                      sizes: '512x512',
+                      type: 'image/png',
+                      purpose: "maskable",
+                  }
               ],
               scope: "/",
               start_url: "/",
               display: "standalone",
               orientation: "portrait"
           },
+          workbox: {
+              runtimeCaching: [
+                  {
+                      urlPattern: /^https:\/\/api\.fastforex\.io\/.*/i,
+                      handler: 'NetworkFirst',
+                      options: {
+                          cacheName: 'api-cache',
+                          expiration: {
+                              maxEntries: 10,
+                              maxAgeSeconds: 60 * 60 * 24
+                          },
+                      },
+                  }
+              ]
+          }
       }),
   ],
     resolve: {

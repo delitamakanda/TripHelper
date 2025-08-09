@@ -10,6 +10,7 @@ import { saveAs } from 'file-saver'
 import {firestore, auth } from "./lib/firebase";
 import { doc, setDoc, getDocs, collection, onSnapshot } from 'firebase/firestore';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import PWAInstallPrompt from "./components/pwa-install-prompt/PWAInstallPrompt.tsx";
 
 const fs = firestore;
 
@@ -497,6 +498,7 @@ return (
                   <p className="text-sm">Écart global : <strong>{remainingBudget} NT$</strong> ({convertToCurrency(remainingBudget)} {selectedCurrency}) {remainingBudget > 0 ? "🚨 Dépassement" : remainingBudget < 0 ? "✅ Économie" : "👌 Parfaitement calé"}</p>
               </CardContent>
           </Card>
+          <PWAInstallPrompt />
       </div>
   )
 }
