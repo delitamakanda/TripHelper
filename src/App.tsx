@@ -233,22 +233,50 @@ function App() {
         // update itinerary with activities and items
         setItinerary(prev => {
             const activitiesByDay: Record<string, string[]> = {}
+            const itemsByDay: Record<string, string[]> = {}
+
             clRows.forEach(row => {
-                if (!activitiesByDay[row.day]) activitiesByDay[row.day] = []
+                // determine activities and items
                 const dayEntry = prev.find(entry => entry.day === row.day)
-                if (dayEntry && !dayEntry.items.includes(row.item) && !activitiesByDay[row.day].includes(row.item)) {
-                    activitiesByDay[row.day].push(row.item)
+                if (!dayEntry) {
+                    return
+                }
+                const isInActivities = dayEntry.activities.includes(row.item)
+                const isInItems = dayEntry.items.includes(row.item)
+
+                if (isInActivities) {
+                    if (!activitiesByDay[row.day]) activitiesByDay[row.day] = []
+                    if (!activitiesByDay[row.day].includes(row.item)) {
+                        activitiesByDay[row.day].push(row.item)
+                    }
+                } else if (isInItems) {
+                    if (!itemsByDay[row.day]) itemsByDay[row.day] = []
+                    if (!itemsByDay[row.day].includes(row.item)) {
+                        itemsByDay[row.day].push(row.item)
+                    }
+                } else {
+                    if (!itemsByDay[row.day]) itemsByDay[row.day] = []
+                    if (!itemsByDay[row.day].includes(row.item)) {
+                        itemsByDay[row.day].push(row.item)
+                    }
                 }
             })
             return prev.map(entry => {
                 const activities = activitiesByDay[entry.day] || []
+                const items = itemsByDay[entry.day] || []
                 const updatedActivities = [...entry.activities]
                 activities.forEach(activity => {
                     if (!updatedActivities.includes(activity)) {
                         updatedActivities.push(activity)
                     }
                 })
-                return {...entry, activities: updatedActivities }
+                const updatedItems = [...entry.items]
+                items.forEach(item => {
+                    if (!updatedItems.includes(item)) {
+                        updatedItems.push(item)
+                    }
+                })
+                return {...entry, activities: updatedActivities, items: updatedItems }
             })
         })
     }
