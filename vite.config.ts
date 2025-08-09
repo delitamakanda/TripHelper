@@ -10,6 +10,10 @@ export default defineConfig({
       react(),
       tailwindcss(),
       VitePWA({
+          registerType: 'autoUpdate',
+          devOptions: {
+              enabled: true,
+          },
           manifest: {
               name: 'Trip Helper',
               short_name: 'Trip Helper',
