@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import {useRef, useState,  useEffect} from 'react'
 import { db } from './db'
 import { Button, Input } from 'react-aria-components'
 import { DateRangeCreator} from "./components/date-range-creator/date-range-creator.tsx";
@@ -6,6 +6,26 @@ import { Card, CardContent } from './components/card/Card'
 import './App.css'
 import { formatDayLabel } from './utils/formatter'
 import { saveAs } from 'file-saver'
+
+import { initializeApp } from 'firebase/app';
+import { doc, setDoc, getDocs, collection, onSnapshot, initializeFirestore, persistentLocalCache, persistentSingleTabManager } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+
+const firebaseConfig = {
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID,
+}
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+
+const fs = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+        tabManager: persistentSingleTabManager({ })
+    })
+})
 
 const initialItinerary = import.meta.env.DEV ? [
     {
@@ -53,8 +73,8 @@ const initialItinerary = import.meta.env.DEV ? [
 ] : []
 
 function App() {
-    const [checked, setChecked] = useState<Record<string, string>>({})
-    const [expenses, setExpenses] = useState<Record<string, string>>({})
+    const [checked, setChecked] = useState<Record<string, string[]>>({})
+    const [expenses, setExpenses] = useState<Record<string, number>>({})
     const [itinerary, setItinerary] = useState(initialItinerary)
     const [newItem, setNewItem] = useState<Record<string, string>>({})
     const [newActivity, setNewActivity] = useState<Record<string, string>>({})
@@ -63,8 +83,278 @@ function App() {
     const [loadingRate, setLoadingRate] = useState<boolean>(false)
     const [selectedCurrency, setSelectedCurrency] = useState(() => localStorage.getItem('preferedCurrency') || 'EUR')
     const [currencyValue, setCurrencyValue] = useState<string>("")
+    const [uid, setUid] = useState<string | null>(null)
+    const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "ok" | "error">("idle")
+    const unsubRefs = useRef<Array<() => void>>([])
+    const syncIntervalRef = useRef<number | null>(null)
 
-  return (
+    const fetchExchangeRate = () => {
+        setLoadingRate(true)
+        const options = {method: 'GET', headers: {accept: 'application/json'}};
+
+        fetch(`https://api.fastforex.io/fetch-multi?from=${selectedCurrency}&to=TWD&api_key=${import.meta.env.VITE_FASTFOREX_API_KEY}`, options)
+            .then(response => response.json())
+            .then(data => {
+                if (data?.results?.TWD) {
+                    setExchangeRate(1 / data.results.TWD)
+                }
+            })
+            .catch(() => {
+                console.error('Failed to fetch exchange rate')
+            })
+            .finally(() => setLoadingRate(false))
+    }
+
+    const totalBudget = itinerary.reduce((acc, curr) => acc + curr.budget, 0);
+    const totalExpenses = Object.values(expenses).reduce((a, b) => a + b, 0);
+    const remainingBudget = totalExpenses - totalBudget;
+    const convertToCurrency = (ntd: number) => (ntd * exchangeRate).toFixed(2);
+
+    useEffect(() => {
+        // fetchExchangeRate();
+        localStorage.setItem('preferedCurrency', selectedCurrency)
+    }, [selectedCurrency])
+
+    useEffect(() => {
+        (async () => {
+            // Auth anonyme Firebase
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    setUid(user.uid);
+                    attachRealtimeListeners(user.uid);
+                } else {
+                    await signInAnonymously(auth).catch(console.error);
+                }
+            });
+
+            // Dexie -> états UI
+            const checklistData = await db.checklist.toArray();
+            const groupedChecklist = checklistData.reduce((acc, curr) => {
+                acc[curr.day] = acc[curr.day] || [];
+                if (curr.checked) acc[curr.day].push(curr.item);
+                return acc;
+            }, {} as Record<string, string[]>);
+            setChecked(groupedChecklist);
+
+            const expensesData = await db.expenses.toArray();
+            const groupedExpenses = expensesData.reduce((acc, curr) => {
+                acc[curr.day] = curr.amount;
+                return acc;
+            }, {} as Record<string, number>);
+            setExpenses(groupedExpenses);
+        })();
+
+        return () => {
+            unsubRefs.current.forEach(off => off());
+            if (syncIntervalRef.current) window.clearInterval(syncIntervalRef.current);
+        };
+
+
+    }, []);
+
+    function attachRealtimeListeners(uid: string) {
+        unsubRefs.current = []
+        unsubRefs.current.forEach(off => off());
+        const checklistCol = collection(fs, `users/${uid}/checklist`);
+        const expensesCol = collection(fs, `users/${uid}/expenses`);
+
+        const off1 = onSnapshot(checklistCol, async (snapshot) => {
+            const rows: any = []
+            snapshot.forEach(docu => {
+                const d = docu.data();
+                rows.push({day: d.day, item: d.item, checked: d.checked})
+            })
+            await db.checklist.clear()
+            await db.checklist.bulkAdd(rows)
+            const groupedChecklist = rows.reduce((acc: any, curr: any) => {
+                acc[curr.day] = acc[curr.day] || [];
+                if (curr.checked) acc[curr.day].push(curr.item);
+                return acc;
+            }, {} as Record<string, string[]>);
+            setChecked(groupedChecklist);
+        })
+
+        const off2 = onSnapshot(expensesCol, async (snapshot) => {
+            const rows: any = []
+            snapshot.forEach(docu => {
+                const d = docu.data();
+                rows.push({day: d.day, amount: d.amount})
+            })
+            await db.expenses.clear()
+            await db.expenses.bulkAdd(rows)
+            const groupedExpenses = rows.reduce((acc: any, curr: any) => {
+                acc[curr.day] = curr.amount;
+                return acc;
+            }, {} as Record<string, number>);
+            setExpenses(groupedExpenses);
+        })
+        unsubRefs.current.push(off1, off2);
+    }
+
+    const pushToCloud = async (uid: string) => {
+        const checklist = await db.checklist.toArray();
+        const expensesRows = await db.expenses.toArray();
+        for (const row of checklist) {
+            const id = btoa(encodeURIComponent(`${row.day}|${row.item}`))
+            await setDoc(doc(fs, `users/${uid}/checklist/${id}`), {
+                day: row.day,
+                item: row.item,
+                checked: row.checked,
+                updatedAt: Date.now() || row.updatedAt,
+            }, {merge: true})
+        }
+        for (const row of expensesRows) {
+            const id = btoa(encodeURIComponent(`${row.day}`))
+            await setDoc(doc(fs, `users/${uid}/expenses/${id}`), {
+                day: row.day,
+                amount: row.amount,
+                updatedAt: Date.now() || row.updatedAt,
+            }, {merge: true})
+        }
+    }
+
+    const syncCloud = async (uid: string) => {
+        const snapCheckList = await getDocs(collection(fs, `users/${uid}/checklist`))
+        const clRows: any[] = []
+        snapCheckList.forEach(doc => {
+            clRows.push(doc.data())
+        })
+        await db.checklist.clear()
+        await db.checklist.bulkAdd(clRows)
+
+        const snapExpenses = await getDocs(collection(fs, `users/${uid}/expenses`))
+        const expRows: any[] = []
+        snapExpenses.forEach(doc => {
+            expRows.push(doc.data())
+        })
+        await db.expenses.clear()
+        await db.expenses.bulkAdd(expRows)
+
+        const groupedChecklist = clRows.reduce((acc: any, curr: any) => {
+            acc[curr.day] = acc[curr.day] || [];
+            if (curr.checked) acc[curr.day].push(curr.item);
+            return acc;
+        }, {} as Record<string, string[]>);
+        setChecked(groupedChecklist);
+
+        const groupedExpenses = expRows.reduce((acc: any, curr: any) => {
+            acc[curr.day] = curr.amount;
+            return acc;
+        }, {} as Record<string, number>);
+        setExpenses(groupedExpenses);
+    }
+
+    const syncNow = async () => {
+        if (!uid) return
+        try {
+            setSyncStatus("syncing")
+            await syncCloud(uid)
+            await pushToCloud(uid)
+            setSyncStatus("ok")
+            setTimeout(() => setSyncStatus("idle"), 1200)
+        } catch (error) {
+            console.error('Failed to sync cloud', error)
+            setSyncStatus("error")
+        }
+    }
+
+    useEffect(() => {
+        if (!uid) return
+        syncNow()
+        if (syncIntervalRef.current) {
+            window.clearInterval(syncIntervalRef.current)
+        }
+        syncIntervalRef.current = window.setInterval(() => syncNow(), 300000) // 5 minutes
+
+        const onFocus = () => syncNow()
+        const onVisible = () => {
+            if (document.visibilityState === 'visible') syncNow()
+        }
+        window.addEventListener('focus', onFocus)
+        document.addEventListener('visibilitychange', onVisible)
+        return () => {
+            window.removeEventListener('focus', onFocus)
+            document.removeEventListener('visibilitychange', onVisible)
+            if (syncIntervalRef.current) window.clearInterval(syncIntervalRef.current)
+        }
+    }, [uid]);
+
+    const exportData = async () => {
+        const checklist = await db.checklist.toArray();
+        const expenses = await db.expenses.toArray();
+        const blob = new Blob([JSON.stringify({checklist, expenses}, null, 2)], {type: 'application/json'});
+        saveAs(blob, `trip-helper-${new Date().toISOString().split('T')[0]}.json`);
+    }
+
+    const clearData = async () => {
+        const confirmClear = window.confirm("Voulez-vous vraiment effacer les données?")
+        if (!confirmClear) {
+            return
+        }
+        await db.checklist.clear()
+        await db.expenses.clear()
+        setChecked({})
+        setExpenses({})
+    }
+
+    const importData = async (file: File) => {
+        const confirmImport = window.confirm("Importer ce fichier va remplacer toutes vos données actuelles. Continuer ?");
+        if (!confirmImport) return;
+        const text = await file.text();
+        const data = JSON.parse(text);
+        if (data.checklist) { await db.checklist.clear(); await db.checklist.bulkAdd(data.checklist); }
+        if (data.expenses) { await db.expenses.clear(); await db.expenses.bulkAdd(data.expenses); }
+        const groupedChecklist = (data.checklist || []).reduce((acc: any, curr: any) => {
+            acc[curr.day] = acc[curr.day] || [];
+            if (curr.checked) acc[curr.day].push(curr.item);
+            return acc;
+        }, {} as Record<string, string[]>);
+        setChecked(groupedChecklist);
+        const groupedExpenses = (data.expenses || []).reduce((acc: any, curr: any) => { acc[curr.day] = curr.amount; return acc; }, {} as Record<string, number>);
+        setExpenses(groupedExpenses);
+    };
+
+    const toggleItem = async (day: string, item: string) => {
+        const isChecked = checked[day]?.includes(item);
+        const id = btoa(encodeURIComponent(`${day}|${item}`))
+        await db.checklist.put({ id, day, item, checked: !isChecked, updatedAt: Date.now()})
+        setChecked(prev => {
+            const dayChecked = prev[day] || [];
+            return {
+                ...prev, [day]: isChecked ? dayChecked.filter(i => i!== item) : [...dayChecked, item]
+            }
+        })
+    }
+
+    const handleExpenseChange = async (day: string, val: number) => {
+        const amount = +val || 0;
+        const id = btoa(encodeURIComponent(`${day}`))
+        await db.expenses.put({id, day, amount, updatedAt: Date.now() })
+        setExpenses(prev => ({...prev, [day]: amount }))
+    }
+
+    const handleAddActivity = async (day: string) => {
+        if (!newActivity[day]) return;
+        setItinerary(prev => prev.map(entry => entry.day === day? {...entry, activities: [...entry.activities, newActivity[day]] } : entry))
+        setNewActivity(prev => ({...prev, [day]: '' }));
+    }
+
+    const handleDeleteActivity = async (day: string, index: number) => {
+        setItinerary(prev => prev.map(entry => entry.day === day? {...entry, activities: entry.activities.filter((_, i) => i!== index) } : entry))
+    }
+
+    const handleAddItem =  (day: string) => {
+        if (!newItem[day]) return;
+        setItinerary(prev => prev.map(entry => entry.day === day? {...entry, items: [...entry.items, newItem[day]] } : entry))
+        setNewItem(prev => ({...prev, [day]: '' }));
+    }
+
+    const handleDeleteItem =  (day: string, item: string | number, idx: number) => {
+        setItinerary(prev => prev.map(entry => entry.day === day? {...entry, items: entry.items.filter((_, i) => i!== idx && item!== i) } : entry))
+
+    }
+
+return (
       <div className="max-w-screen-sm mx-auto px-4 py-6 space-y-6">
           <h1 className="text-2xl font-bold mb-2 text-center">📅 Planificateur de voyage</h1>
 
@@ -79,12 +369,19 @@ function App() {
           {/* maj cloud */}
           <Card>
               <CardContent className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="text-sm">Cloud sync</div>
+                  <div className="text-sm">Cloud sync (Firebase) — {uid ? <span className="text-green-600">connecté</span> : <span className="text-gray-500">connexion…</span>}</div>
                   <div className="flex gap-2">
-                      <Button>🔁 Synchroniser maintenant</Button>
+                      <button onClick={syncNow} disabled={!uid || syncStatus === 'syncing'}>{syncStatus === "syncing" ? "🔄 Synchronisation…" : syncStatus === "ok" ? "✅ Sync OK" : syncStatus === "error" ? "⚠️ Erreur" : "🔁 Synchroniser maintenant"}</button>
+                  </div>
+                  <div>
+                      <input type="file" accept="application/json" onChange={(e) => e.target.files?.[0] && importData(e.target.files[0])} />
+                      <Button onClick={exportData}>📤 Exporter</Button>
+                      <Button onClick={clearData}>🗑 Reset</Button>
                   </div>
               </CardContent>
-              {/* convertisseur de devises */}
+          </Card>
+          {/* convertisseur de devises */}
+          <Card>
               <CardContent className="space-y-4">
                   <h2 className="text-lg font-semibold">💱 Convertisseur de devises</h2>
                   <div className="flex items-center gap-2">
@@ -96,7 +393,7 @@ function App() {
                               ))
                           }
                       </select>
-                      <Button>Convertir</Button>
+                      <Button onClick={fetchExchangeRate}>{loadingRate ? '...' : "🔁"}</Button>
                   </div>
                   <div>
                       <p className="text-xs text-gray-500">1 {selectedCurrency} ≈ {(1 / exchangeRate).toFixed(4)} TWD</p>
@@ -126,36 +423,42 @@ function App() {
                           <ul className="list-disc list-inside text-sm text-gray-700">
                               {activities.map((activity, idx) => (
                                   <li key={idx} className="flex items-center justify-between"><span>{activity}</span>
-                                      <Button>❌</Button>
+                                      <Button onClick={() => handleDeleteActivity(day, idx)}>❌</Button>
                                   </li>
                               ))}
                           </ul>
                           <div className="flex gap-2 mt-2">
                               <Input placeholder="Nouvelle activité" value={newActivity[day] || ""} onChange={e => setNewActivity(prev => ({ ...prev, [day]: e.target.value }))} />
-                              <Button>➕</Button>
+                              <Button onClick={() => handleAddActivity(day)}>➕</Button>
                           </div>
                       </div>
                       <div>
                           <p className="font-medium text-sm">À emporter :</p>
                           <ul className="space-y-1">
-                              {items.map((item, idx) => (
-                                  <li key={idx} className={`flex items-center justify-between px-3 py-1 rounded-lg border text-sm ${checked[day]?.includes(item) ? "bg-green-100 line-through text-gray-500" : "bg-white"}`}><span>{item}</span>
+                              {items.map((item, index) => (
+                                  <li key={index} className={`flex items-center justify-between px-3 py-1 rounded-lg border text-sm ${checked[day]?.includes(item) ? "bg-green-100 line-through text-gray-500" : "bg-white"}`}><span>{item}</span>
                                       <div className="flex gap-2">
-                                          <Button>
+                                          <Button onClick={() => toggleItem(day, item)}>
                                               {checked[day]?.includes(item) ? "✔️" : "🧳"}
                                           </Button>
-                                          <Button>❌</Button>
+                                          <Button onClick={() => handleDeleteItem(day, item, index)}>❌</Button>
                                       </div>
                                   </li>
                               ))}
                           </ul>
                           <div className="flex gap-2 mt-2">
                               <Input placeholder="Nouvel objet à emporter" value={newItem[day] || ""} onChange={e => setNewItem(prev => ({ ...prev, [day]: e.target.value }))} />
-                              <Button>➕</Button>
+                              <Button onClick={() => handleAddItem(day)}>➕</Button>
                           </div>
                       </div>
 
                       <div className="space-y-1">
+                          <p className="text-sm text-gray-500 mt-2">💰 Budget : <strong>{budget.toLocaleString()} NT$</strong> (~{convertToCurrency(budget)} {selectedCurrency})</p>
+                          <label>Dépenses (NT$)</label>
+                          <input type="number" value={expenses[day] || ""} onChange={e => handleExpenseChange(day, +e.target.value)} />
+                          <p className="text-xs text-gray-600">
+                              {expenses[day] !== undefined && `Écart : ${expenses[day] - budget} NT$ (${convertToCurrency(expenses[day] - budget)} ${selectedCurrency}) ${expenses[day] > budget ? '🚨' : '✅'}`}
+                          </p>
 
                       </div>
                   </CardContent>
@@ -165,6 +468,9 @@ function App() {
           <Card>
               <CardContent className="space-y-2">
                   <h2 className="text-lg font-semibold text-center">📊 Récapitulatif Global</h2>
+                  <p className="text-sm">Budget total : <strong>{totalBudget.toLocaleString()} NT$</strong> (~{convertToCurrency(totalBudget)} {selectedCurrency})</p>
+                  <p className="text-sm">Dépenses totales : <strong>{totalExpenses.toLocaleString()} NT$</strong> (~{convertToCurrency(totalExpenses)} {selectedCurrency})</p>
+                  <p className="text-sm">Écart global : <strong>{remainingBudget} NT$</strong> ({convertToCurrency(remainingBudget)} {selectedCurrency}) {remainingBudget > 0 ? "🚨 Dépassement" : remainingBudget < 0 ? "✅ Économie" : "👌 Parfaitement calé"}</p>
               </CardContent>
           </Card>
       </div>
