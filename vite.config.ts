@@ -27,12 +27,12 @@ export default defineConfig({
                       type: 'image/ico',
                   },
                   {
-                      src: '/android-chrome-192x192.png',
+                      src: '/pwa-192x192.png',
                       sizes: '192x192',
                       type: 'image/png',
                   },
                   {
-                      src: '/android-chrome-512x512.png',
+                      src: '/pwa-512x512.png',
                       sizes: '512x512',
                       type: 'image/png',
                   },
