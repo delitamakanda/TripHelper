@@ -15,7 +15,6 @@ export default function PWAInstallPrompt() {
             return
         }
         const handleBeforeInstallPrompt = (event: Event) => {
-            event.preventDefault();
             setPromptEvent(event as BeforeInstallPromptEvent);
         };
         window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
