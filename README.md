@@ -1,69 +1,56 @@
-# React + TypeScript + Vite
+# 🇹🇼 TripHelper — PWA de planification de voyage
+TripHelper est une application mobile-friendly, offline-first, qui permet de planifier, suivre son budget et gérer son matériel pour un voyage à Taïwan (ou ailleurs).
+Créée avec React, Tailwindcss et Dexie.js pour la base de données locale.
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+### Fonctionnalités
+- Itinéraire journalier avec activités, objets à emporter et dépenses prévues
+- Suivi des dépenses réelles jour par jour 
+- Convertisseur de devises (NTD ⇄ EUR, USD, JPY, KRW, etc.) via Fastforex API 
+- Base de données locale avec Dexie.js (IndexedDB)
+- Export & import des données au format JSON 
+- Réinitialisation des données avec confirmation 
+- Mode PWA : installable et utilisable offline 
+- Sauvegarde de la devise préférée
 
-Currently, two official plugins are available:
+### Stack technique
+| Technologie  |              Usage               |
+|:------------:|:--------------------------------:|
+|   React 19   |             Frontend             |
+|   Dexie.js   | Base de données locale (offline) |
+| FastForex    | API Taux de change en temps réel |
+| FileSaver.js |         Export des datas         |
+|     Vite     |           Build front            |
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### 🚀 Installation locale
+```bash
+git clone https://github.com/delitamakanda/TripHelper.git
+cd TripHelper
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Structure
+```bash
+src/
+├── App.tsx               # Composant principal
+├── db.ts                 # Dexie DB locale
+├── components/           # Composants réutilisables
+└── assets/               # visuels
 ```
+
+### Fonctionnalité PWA
+L'app peut être installée sur smartphone ou tablette :
+- Sur Chrome : bouton “Installer” dans la barre d'adresse 
+- Fonctionne hors ligne une fois chargée
+
+### Export des données
+- Format JSON structuré (checklist + dépenses)
+- Peut être importé sur une autre session/navigateur
+
+### À venir
+- Notifications locales
+- 🌙 Mode nuit 
+- Planificateur de trajets
+
+### Auteur
+Développé avec ❤️ par Délita pour un usage personnel et éducatif, à l'occasion d'un voyage à Taïwan 🇹🇼
