@@ -11,6 +11,7 @@ export default defineConfig({
       tailwindcss(),
       VitePWA({
           registerType: 'autoUpdate',
+          includeAssets: ['favicon.ico', 'pwa-192x192.png', 'pwa-512x512.png'],
           devOptions: {
               enabled: true,
           },
@@ -37,6 +38,10 @@ export default defineConfig({
                       type: 'image/png',
                   },
               ],
+              scope: "/",
+              start_url: "/",
+              display: "standalone",
+              orientation: "portrait"
           },
       }),
   ],
