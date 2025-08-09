@@ -7,25 +7,11 @@ import './App.css'
 import { formatDayLabel } from './utils/formatter'
 import { saveAs } from 'file-saver'
 
-import { initializeApp } from 'firebase/app';
-import { doc, setDoc, getDocs, collection, onSnapshot, initializeFirestore, persistentLocalCache, persistentSingleTabManager } from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import {firestore, auth } from "./lib/firebase";
+import { doc, setDoc, getDocs, collection, onSnapshot } from 'firebase/firestore';
+import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
-const firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID,
-}
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-
-const fs = initializeFirestore(app, {
-    localCache: persistentLocalCache({
-        tabManager: persistentSingleTabManager({ })
-    })
-})
+const fs = firestore;
 
 const initialItinerary = import.meta.env.DEV ? [
     {
@@ -153,8 +139,8 @@ function App() {
     }, []);
 
     function attachRealtimeListeners(uid: string) {
-        unsubRefs.current = []
         unsubRefs.current.forEach(off => off());
+        unsubRefs.current = []
         const checklistCol = collection(fs, `users/${uid}/checklist`);
         const expensesCol = collection(fs, `users/${uid}/expenses`);
 
@@ -162,7 +148,7 @@ function App() {
             const rows: any = []
             snapshot.forEach(docu => {
                 const d = docu.data();
-                rows.push({day: d.day, item: d.item, checked: d.checked})
+                rows.push({id: docu.id, day: d.day, item: d.item, checked: d.checked, updatedAt: d.updatedAt ?? 0})
             })
             await db.checklist.clear()
             await db.checklist.bulkAdd(rows)
@@ -178,7 +164,7 @@ function App() {
             const rows: any = []
             snapshot.forEach(docu => {
                 const d = docu.data();
-                rows.push({day: d.day, amount: d.amount})
+                rows.push({id: docu.id, day: d.day, amount: d.amount, updatedAt: d.updatedAt?? 0})
             })
             await db.expenses.clear()
             await db.expenses.bulkAdd(rows)
@@ -195,7 +181,7 @@ function App() {
         const checklist = await db.checklist.toArray();
         const expensesRows = await db.expenses.toArray();
         for (const row of checklist) {
-            const id = btoa(encodeURIComponent(`${row.day}|${row.item}`))
+            const id = row.id ?? btoa(encodeURIComponent(`${row.day}|${row.item}`))
             await setDoc(doc(fs, `users/${uid}/checklist/${id}`), {
                 day: row.day,
                 item: row.item,
@@ -204,7 +190,7 @@ function App() {
             }, {merge: true})
         }
         for (const row of expensesRows) {
-            const id = btoa(encodeURIComponent(`${row.day}`))
+            const id = row.id ?? btoa(encodeURIComponent(`${row.day}`))
             await setDoc(doc(fs, `users/${uid}/expenses/${id}`), {
                 day: row.day,
                 amount: row.amount,
@@ -217,7 +203,7 @@ function App() {
         const snapCheckList = await getDocs(collection(fs, `users/${uid}/checklist`))
         const clRows: any[] = []
         snapCheckList.forEach(doc => {
-            clRows.push(doc.data())
+            clRows.push({ id: doc.id, ...doc.data()})
         })
         await db.checklist.clear()
         await db.checklist.bulkAdd(clRows)
@@ -225,7 +211,7 @@ function App() {
         const snapExpenses = await getDocs(collection(fs, `users/${uid}/expenses`))
         const expRows: any[] = []
         snapExpenses.forEach(doc => {
-            expRows.push(doc.data())
+            expRows.push({id: doc.id, ...doc.data()})
         })
         await db.expenses.clear()
         await db.expenses.bulkAdd(expRows)
@@ -248,8 +234,8 @@ function App() {
         if (!uid) return
         try {
             setSyncStatus("syncing")
-            await syncCloud(uid)
             await pushToCloud(uid)
+            await syncCloud(uid)
             setSyncStatus("ok")
             setTimeout(() => setSyncStatus("idle"), 1200)
         } catch (error) {
@@ -302,8 +288,16 @@ function App() {
         if (!confirmImport) return;
         const text = await file.text();
         const data = JSON.parse(text);
-        if (data.checklist) { await db.checklist.clear(); await db.checklist.bulkAdd(data.checklist); }
-        if (data.expenses) { await db.expenses.clear(); await db.expenses.bulkAdd(data.expenses); }
+        if (data.checklist) {
+            const rows = data.checklist.map(item => ({ id: item.id ?? btoa(encodeURIComponent(`${item.day}|${item.item}`)),...item }));
+            await db.checklist.clear();
+            await db.checklist.bulkAdd(rows);
+        }
+        if (data.expenses) {
+            const rows = data.expenses.map(item => ({ id: item.id ?? btoa(encodeURIComponent(item.day)),...item }));
+            await db.expenses.clear();
+            await db.expenses.bulkAdd(rows);
+        }
         const groupedChecklist = (data.checklist || []).reduce((acc: any, curr: any) => {
             acc[curr.day] = acc[curr.day] || [];
             if (curr.checked) acc[curr.day].push(curr.item);
