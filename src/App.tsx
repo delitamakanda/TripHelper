@@ -312,12 +312,12 @@ function App() {
         const text = await file.text();
         const data = JSON.parse(text);
         if (data.checklist) {
-            const rows = data.checklist.map(item => ({ id: item.id ?? btoa(encodeURIComponent(`${item.day}|${item.item}`)),...item }));
+            const rows = data.checklist.map((item: any) => ({ id: item.id ?? btoa(encodeURIComponent(`${item.day}|${item.item}`)),...item }));
             await db.checklist.clear();
             await db.checklist.bulkPut(rows);
         }
         if (data.expenses) {
-            const rows = data.expenses.map(item => ({ id: item.id ?? btoa(encodeURIComponent(item.day)),...item }));
+            const rows = data.expenses.map((item: any) => ({ id: item.id ?? btoa(encodeURIComponent(item.day)),...item }));
             await db.expenses.clear();
             await db.expenses.bulkPut(rows);
         }
