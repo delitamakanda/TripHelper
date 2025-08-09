@@ -228,6 +228,28 @@ function App() {
             return acc;
         }, {} as Record<string, number>);
         setExpenses(groupedExpenses);
+
+        // update itinerary with activities and items
+        setItinerary(prev => {
+            const activitiesByDay: Record<string, string[]> = {}
+            clRows.forEach(row => {
+                if (!activitiesByDay[row.day]) activitiesByDay[row.day] = []
+                const dayEntry = prev.find(entry => entry.day === row.day)
+                if (dayEntry && !dayEntry.items.includes(row.item) && !activitiesByDay[row.day].includes(row.item)) {
+                    activitiesByDay[row.day].push(row.item)
+                }
+            })
+            return prev.map(entry => {
+                const activities = activitiesByDay[entry.day] || []
+                const updatedActivities = [...entry.activities]
+                activities.forEach(activity => {
+                    if (!updatedActivities.includes(activity)) {
+                        updatedActivities.push(activity)
+                    }
+                })
+                return {...entry, activities: updatedActivities }
+            })
+        })
     }
 
     const syncNow = async () => {
