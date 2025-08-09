@@ -148,10 +148,10 @@ function App() {
             const rows: any = []
             snapshot.forEach(docu => {
                 const d = docu.data();
-                rows.push({id: docu.id, day: d.day, item: d.item, checked: d.checked, updatedAt: d.updatedAt ?? 0})
+                rows.push({id: docu.id, day: d.day, item: d.item, checked: d.checked, updatedAt: d.updateAt ?? 0})
             })
             await db.checklist.clear()
-            await db.checklist.bulkAdd(rows)
+            await db.checklist.bulkPut(rows)
             const groupedChecklist = rows.reduce((acc: any, curr: any) => {
                 acc[curr.day] = acc[curr.day] || [];
                 if (curr.checked) acc[curr.day].push(curr.item);
@@ -167,7 +167,7 @@ function App() {
                 rows.push({id: docu.id, day: d.day, amount: d.amount, updatedAt: d.updatedAt?? 0})
             })
             await db.expenses.clear()
-            await db.expenses.bulkAdd(rows)
+            await db.expenses.bulkPut(rows)
             const groupedExpenses = rows.reduce((acc: any, curr: any) => {
                 acc[curr.day] = curr.amount;
                 return acc;
@@ -206,7 +206,7 @@ function App() {
             clRows.push({ id: doc.id, ...doc.data()})
         })
         await db.checklist.clear()
-        await db.checklist.bulkAdd(clRows)
+        await db.checklist.bulkPut(clRows)
 
         const snapExpenses = await getDocs(collection(fs, `users/${uid}/expenses`))
         const expRows: any[] = []
@@ -214,7 +214,7 @@ function App() {
             expRows.push({id: doc.id, ...doc.data()})
         })
         await db.expenses.clear()
-        await db.expenses.bulkAdd(expRows)
+        await db.expenses.bulkPut(expRows)
 
         const groupedChecklist = clRows.reduce((acc: any, curr: any) => {
             acc[curr.day] = acc[curr.day] || [];
@@ -291,12 +291,12 @@ function App() {
         if (data.checklist) {
             const rows = data.checklist.map(item => ({ id: item.id ?? btoa(encodeURIComponent(`${item.day}|${item.item}`)),...item }));
             await db.checklist.clear();
-            await db.checklist.bulkAdd(rows);
+            await db.checklist.bulkPut(rows);
         }
         if (data.expenses) {
             const rows = data.expenses.map(item => ({ id: item.id ?? btoa(encodeURIComponent(item.day)),...item }));
             await db.expenses.clear();
-            await db.expenses.bulkAdd(rows);
+            await db.expenses.bulkPut(rows);
         }
         const groupedChecklist = (data.checklist || []).reduce((acc: any, curr: any) => {
             acc[curr.day] = acc[curr.day] || [];
@@ -330,21 +330,29 @@ function App() {
     const handleAddActivity = async (day: string) => {
         if (!newActivity[day]) return;
         setItinerary(prev => prev.map(entry => entry.day === day? {...entry, activities: [...entry.activities, newActivity[day]] } : entry))
+        const id = btoa(encodeURIComponent(`${day}|${newActivity[day]}`))
+        await db.checklist.put({ id, day, item: newActivity[day], checked: false, updatedAt: Date.now() })
         setNewActivity(prev => ({...prev, [day]: '' }));
     }
 
     const handleDeleteActivity = async (day: string, index: number) => {
         setItinerary(prev => prev.map(entry => entry.day === day? {...entry, activities: entry.activities.filter((_, i) => i!== index) } : entry))
+        const id = btoa(encodeURIComponent(`${day}|${newActivity[day]}`))
+        await db.checklist.delete(id);
     }
 
-    const handleAddItem =  (day: string) => {
+    const handleAddItem =  async (day: string) => {
         if (!newItem[day]) return;
         setItinerary(prev => prev.map(entry => entry.day === day? {...entry, items: [...entry.items, newItem[day]] } : entry))
         setNewItem(prev => ({...prev, [day]: '' }));
+        const id = btoa(encodeURIComponent(`${day}|${newItem[day]}`))
+        await db.checklist.put({ id, day, item: newItem[day], checked: false, updatedAt: Date.now() })
     }
 
-    const handleDeleteItem =  (day: string, item: string | number, idx: number) => {
+    const handleDeleteItem =  async (day: string, item: string | number, idx: number) => {
         setItinerary(prev => prev.map(entry => entry.day === day? {...entry, items: entry.items.filter((_, i) => i!== idx && item!== i) } : entry))
+        const id = btoa(encodeURIComponent(`${day}|${item}`))
+        await db.checklist.delete(id);
 
     }
 
