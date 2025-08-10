@@ -1,5 +1,6 @@
 import {useState} from "react";
 import {Button} from "react-aria-components";
+import { db } from '../../db'
 
 export function DateRangeCreator({ onCreate } :{ onCreate: (days: Array<{ day: string, activities: string[], items: string[], budget: number
 }>) => void }) {
@@ -7,7 +8,7 @@ export function DateRangeCreator({ onCreate } :{ onCreate: (days: Array<{ day: s
     const [endDate, setEndDate] = useState<string >('');
     const [defaultBudget, setDefaultBudget] = useState<number>(3500);
 
-    const createRange = () => {
+    const createRange = async () => {
         if (!startDate && !endDate) {
             return;
         }
@@ -26,6 +27,9 @@ export function DateRangeCreator({ onCreate } :{ onCreate: (days: Array<{ day: s
                 budget: defaultBudget,
             });
         }
+        // save to IndexedDB
+        const checklistItems = output.map(item => ({ id: btoa(encodeURIComponent(`${item.day}|`)),day: item.day, item: '', checked: false, updatedAt: Date.now() }));
+        await db.checklist.bulkAdd(checklistItems);
         onCreate(output);
         setStartDate('');
         setEndDate('');
