@@ -27,9 +27,14 @@ export function DateRangeCreator({ onCreate } :{ onCreate: (days: Array<{ day: s
                 budget: defaultBudget,
             });
         }
-        // save to IndexedDB
-        const checklistItems = output.map(item => ({ id: btoa(encodeURIComponent(`${item.day}|`)),day: item.day, item: '', checked: false, updatedAt: Date.now() }));
-        await db.checklist.bulkAdd(checklistItems);
+        const expenseItems = output.map(item => ({
+            id: btoa(encodeURIComponent(`${item.day}|`)),
+            day: item.day,
+            amount: 0,
+            updatedAt: Date.now()
+        }));
+
+        await db.expenses.bulkAdd(expenseItems);
         onCreate(output);
         setStartDate('');
         setEndDate('');

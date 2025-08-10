@@ -6,6 +6,7 @@ export interface ChecklistItem {
     item: string;
     checked: boolean;
     updatedAt: number;
+    type?: 'item' | 'activity';
 }
 
 export interface ExpenseItem {
@@ -57,6 +58,29 @@ export class TripHelperDB extends Dexie {
             await tx.table('checklist').toCollection().modify((item) => {
                 if (item.day) {
                     item.day = toIso(item.day);
+                }
+            })
+            await tx.table('expenses').toCollection().modify((item) => {
+                if (item.day) {
+                    item.day = toIso(item.day);
+                }
+            })
+        })
+        this.version(3).stores({
+            checklist: 'id, day, item, type',
+            expenses: 'id, day',
+        }).upgrade(async (tx) => {
+            await tx.table('checklist').toCollection().modify((item) => {
+                if (item.day) {
+                    item.day = toIso(item.day);
+                }
+                try {
+                    const savedItinerary = localStorage.getItem('tripItinerary')
+                    if (savedItinerary) {
+                        // Parse saved itinerary
+                    }
+                } catch (e) {
+                    console.error('Error parsing trip itinerary:', e)
                 }
             })
             await tx.table('expenses').toCollection().modify((item) => {

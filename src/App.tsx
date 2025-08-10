@@ -75,6 +75,102 @@ function App() {
     const unsubRefs = useRef<Array<() => void>>([])
     const syncIntervalRef = useRef<number | null>(null)
 
+    const restoreInitialItinerary = () => {
+        const defaultItinerary = [
+            {
+                day: "2025-11-30", // Dim 30/11
+                activities: ["Songshan Ciyou Temple", "Rainbow Bridge", "Raohe Night Market"],
+                items: ["Passeport", "Cash NT$", "EasyCard", "Sac à dos"],
+                budget: 3500
+            },
+            {
+                day: "2025-12-01",
+                activities: ["Xiangshan Trail", "Beitou Thermal Valley", "Onsen Long Nice"],
+                items: ["Chaussures confort", "Maillot de bain", "Serviette", "Crème solaire"],
+                budget: 3500
+            },
+            {
+                day: "2025-12-02",
+                activities: ["Jiufen Old Street", "Golden Waterfall", "Yinyang Sea"],
+                items: ["Batterie externe", "Snacks", "Cash NT$", "Vêtements confort"],
+                budget: 3500
+            },
+            {
+                day: "2025-12-03",
+                activities: ["Chiang Kai-shék Memorial", "Spa des oreilles Ximending", "Tamsui balade"],
+                items: ["Réservation Spa", "Tenue confortable", "Cash NT$", "Baume à lèvres"],
+                budget: 5200
+            },
+            {
+                day: "2025-12-04",
+                activities: ["Yangmingshan National Park", "Shilin Night Market"],
+                items: ["Chaussures rando", "Coupe-vent", "Cash NT$", "EasyCard"],
+                budget: 3500
+            },
+            {
+                day: "2025-12-05",
+                activities: ["Shifen Waterfall", "Lanternes", "Houtong Cat Village"],
+                items: ["Batterie externe", "Souvenirs", "Gourde", "Chaussures confort"],
+                budget: 3500
+            },
+            {
+                day: "2025-12-06",
+                activities: ["Takeout Din Tai Fung", "Yongkang Park", "Drunken Moon Lake"],
+                items: ["Tote bag", "Cash NT$", "Crème solaire", "Lunettes de soleil"],
+                budget: 3500
+            }
+        ]
+        localStorage.setItem('tripItinerary', JSON.stringify(defaultItinerary))
+        if (uid) {
+            db.checklist.clear()
+            db.expenses.clear()
+            syncInitialItineraryToFirestore(uid)
+        }
+        return defaultItinerary
+    }
+
+    const syncInitialItineraryToFirestore = async(uid: string) => {
+        if (!uid) {
+            return
+        }
+        try {
+            setSyncStatus("syncing")
+            for (const day of itinerary) {
+                for (const activity of day.activities) {
+                    const id = btoa(encodeURIComponent(`${day.day}|${activity}`));
+                    await setDoc(doc(fs, `users/${uid}/checklist/${id}`), {
+                        day: day.day,
+                        item: activity,
+                        checked: checked[day.day]?.includes(activity) || false,
+                        type: 'activity',
+                        updatedAt: new Date()
+                    }, { merge: true })
+                }
+                for (const item of day.items) {
+                    const id = btoa(encodeURIComponent(`${day.day}|${item}`));
+                    await setDoc(doc(fs, `users/${uid}/checklist/${id}`), {
+                        day: day.day,
+                        item: item,
+                        checked: checked[day.day]?.includes(item) || false,
+                        type: 'item',
+                        updatedAt: new Date()
+                    }, { merge: true })
+                }
+                const expenseId = btoa(encodeURIComponent(`${day.day}`));
+                await setDoc(doc(fs, `users/${uid}/expenses/${expenseId}`), {
+                    day: day.day,
+                    amount: expenses[day.day] || 0,
+                    updatedAt: new Date()
+                }, { merge: true })
+            }
+            setSyncStatus("ok")
+            setTimeout(() => setSyncStatus("idle"), 1200)
+        } catch {
+            console.error('Failed to sync initial itinerary to Firestore')
+            setSyncStatus("error")
+        }
+    }
+
     const fetchExchangeRate = () => {
         setLoadingRate(true)
         const options = {method: 'GET', headers: {accept: 'application/json'}};
@@ -96,6 +192,10 @@ function App() {
     const totalExpenses = Object.values(expenses).reduce((a, b) => a + b, 0);
     const remainingBudget = totalExpenses - totalBudget;
     const convertToCurrency = (ntd: number) => (ntd * exchangeRate).toFixed(2);
+
+    useEffect(() => {
+        localStorage.setItem('tripItinerary', JSON.stringify(itinerary))
+    }, [itinerary]);
 
     useEffect(() => {
         // fetchExchangeRate();
@@ -182,11 +282,24 @@ function App() {
         const checklist = await db.checklist.toArray();
         const expensesRows = await db.expenses.toArray();
         for (const row of checklist) {
+            if (!row.item || row.item.trim() === '') {
+                continue
+            }
             const id = row.id ?? btoa(encodeURIComponent(`${row.day}|${row.item}`))
+            let itemType = row.type
+            if (!itemType) {
+                const dayEntry = itinerary.find(entry => entry.day === row.day);
+                if(dayEntry) {
+                    itemType = dayEntry.activities.includes(row.item)? 'activity' : 'item';
+                } else {
+                    itemType = 'item';
+                }
+            }
             await setDoc(doc(fs, `users/${uid}/checklist/${id}`), {
                 day: row.day,
                 item: row.item,
                 checked: row.checked,
+                type: itemType,
                 updatedAt: Date.now() || row.updatedAt,
             }, {merge: true})
         }
@@ -204,7 +317,10 @@ function App() {
         const snapCheckList = await getDocs(collection(fs, `users/${uid}/checklist`))
         const clRows: any[] = []
         snapCheckList.forEach(doc => {
-            clRows.push({ id: doc.id, ...doc.data()})
+            const d = doc.data();
+            if (d.item && d.item.trim() !== '') {
+                clRows.push({ id: doc.id,...doc.data()})
+            }
         })
         await db.checklist.clear()
         await db.checklist.bulkPut(clRows)
@@ -232,51 +348,43 @@ function App() {
 
         // update itinerary with activities and items
         setItinerary(prev => {
-            const activitiesByDay: Record<string, string[]> = {}
-            const itemsByDay: Record<string, string[]> = {}
+            const updatedItinerary = [...prev]
+
+            const itemsByDayAndType: Record<string, { activities: string[], items: string[] }> = {}
 
             clRows.forEach(row => {
-                // determine activities and items
-                const dayEntry = prev.find(entry => entry.day === row.day)
-                if (!dayEntry) {
-                    return
-                }
-                const isInActivities = dayEntry.activities.includes(row.item)
-                const isInItems = dayEntry.items.includes(row.item)
+                const { day, item, type } = row
 
-                if (isInActivities) {
-                    if (!activitiesByDay[row.day]) activitiesByDay[row.day] = []
-                    if (!activitiesByDay[row.day].includes(row.item)) {
-                        activitiesByDay[row.day].push(row.item)
-                    }
-                } else if (isInItems) {
-                    if (!itemsByDay[row.day]) itemsByDay[row.day] = []
-                    if (!itemsByDay[row.day].includes(row.item)) {
-                        itemsByDay[row.day].push(row.item)
-                    }
-                } else {
-                    if (!itemsByDay[row.day]) itemsByDay[row.day] = []
-                    if (!itemsByDay[row.day].includes(row.item)) {
-                        itemsByDay[row.day].push(row.item)
+                if (!item || item.trim() === '') return
+
+                if (!itemsByDayAndType[day]) itemsByDayAndType[day] = { activities: [], items: [] }
+
+                if (type === 'activity' && !itemsByDayAndType[day].activities.includes(item)) {
+                    itemsByDayAndType[day].activities.push(item)
+                } else if (type === 'item' &&!itemsByDayAndType[day].items.includes(item)) {
+                    itemsByDayAndType[day].items.push(item)
+                } else if (!type) {
+                    const dayEntry = prev.find(entry => entry.day === day)
+                    if (dayEntry) {
+                        // fallback to item if type is missing
+                        if (dayEntry.activities.includes(item) && !itemsByDayAndType[day].activities.includes(item)) {
+                            itemsByDayAndType[day].activities.push(item)
+                        } else if(dayEntry.items.includes(item) &&!itemsByDayAndType[day].items.includes(item)) {
+                            itemsByDayAndType[day].items.push(item)
+                        } else if (!itemsByDayAndType[day].items.includes(item)) {
+                            itemsByDayAndType[day].items.push(item)
+                        }
+                    }  else if (!itemsByDayAndType[day].items.includes(item)) {
+                        itemsByDayAndType[day].items.push(item)
                     }
                 }
             })
-            return prev.map(entry => {
-                const activities = activitiesByDay[entry.day] || []
-                const items = itemsByDay[entry.day] || []
-                const updatedActivities = [...entry.activities]
-                activities.forEach(activity => {
-                    if (!updatedActivities.includes(activity)) {
-                        updatedActivities.push(activity)
-                    }
-                })
-                const updatedItems = [...entry.items]
-                items.forEach(item => {
-                    if (!updatedItems.includes(item)) {
-                        updatedItems.push(item)
-                    }
-                })
-                return {...entry, activities: updatedActivities, items: updatedItems }
+            return updatedItinerary.map(entry => {
+                const dayItems = itemsByDayAndType[entry.day]
+                if (!dayItems) {
+                    return entry
+                }
+                return {...entry, activities: dayItems.activities.length > 0 ? dayItems.activities : entry.activities, items: dayItems.items.length > 0? dayItems.items : entry.items}
             })
         })
     }
@@ -382,7 +490,7 @@ function App() {
         if (!newActivity[day]) return;
         setItinerary(prev => prev.map(entry => entry.day === day? {...entry, activities: [...entry.activities, newActivity[day]] } : entry))
         const id = btoa(encodeURIComponent(`${day}|${newActivity[day]}`))
-        await db.checklist.put({ id, day, item: newActivity[day], checked: false, updatedAt: Date.now() })
+        await db.checklist.put({ id, day, item: newActivity[day], checked: false, type: 'activity', updatedAt: Date.now() })
         setNewActivity(prev => ({...prev, [day]: '' }));
     }
 
@@ -397,7 +505,7 @@ function App() {
         setItinerary(prev => prev.map(entry => entry.day === day? {...entry, items: [...entry.items, newItem[day]] } : entry))
         setNewItem(prev => ({...prev, [day]: '' }));
         const id = btoa(encodeURIComponent(`${day}|${newItem[day]}`))
-        await db.checklist.put({ id, day, item: newItem[day], checked: false, updatedAt: Date.now() })
+        await db.checklist.put({ id, day, item: newItem[day], checked: false, type: 'item', updatedAt: Date.now() })
     }
 
     const handleDeleteItem =  async (day: string, item: string | number, idx: number) => {
@@ -430,6 +538,12 @@ return (
                       <input type="file" accept="application/json" onChange={(e) => e.target.files?.[0] && importData(e.target.files[0])} />
                       <Button onClick={exportData}>📤 Exporter</Button>
                       <Button onClick={clearData}>🗑 Reset</Button>
+                      {import.meta.env.DEV && (<Button onClick={() => {
+                          const confirmRestore = window.confirm('Voulez-vous restaurer votre itinéraire?')
+                          if (confirmRestore) {
+                              setItinerary(restoreInitialItinerary())
+                          }
+                      }}>🔄 Restaurer itinéraire</Button>)}
                   </div>
               </CardContent>
           </Card>
