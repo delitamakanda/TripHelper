@@ -12,6 +12,7 @@ import { doc, setDoc, writeBatch, getDocs, collection, onSnapshot } from 'fireba
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import PWAInstallPrompt from "./components/pwa-install-prompt/PWAInstallPrompt.tsx";
 import ToggleTheme from "./components/toggle-theme/ToggleTheme.tsx";
+import { useDayPlanNotification } from './hooks/use-dayplan-notifications';
 
 const fs = firestore;
 
@@ -197,6 +198,7 @@ function App() {
     const totalExpenses = Object.values(expenses).reduce((a, b) => a + b, 0);
     const remainingBudget = totalExpenses - totalBudget;
     const convertToCurrency = (ntd: number) => (ntd * exchangeRate).toFixed(2);
+    useDayPlanNotification(itinerary)
 
     useEffect(() => {
         localStorage.setItem('tripItinerary', JSON.stringify(itinerary))
