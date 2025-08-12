@@ -508,12 +508,13 @@ function App() {
     }
 
     const handleDeleteActivity = async (day: string, index: number) => {
-        const dayEntry = itinerary.find(entry => entry.day === day);
-        const toDelete = dayEntry?.activities[index];
-        if (toDelete) {
-            const id = btoa(encodeURIComponent(`${day}|${toDelete}`))
-            await db.checklist.delete(id);
+        const activityToDelete = itinerary.find(entry => entry.day === day)?.activities[index];
+        if (!activityToDelete) {
+            return
         }
+        setItinerary(prev => prev.map(entry => entry.day === day? {...entry, activities: entry.activities.filter((_, i) => i!== index) } : entry))
+        const id = btoa(encodeURIComponent(`${day}|${activityToDelete}`))
+        await db.checklist.delete(id);
     }
 
     const handleAddItem =  async (day: string) => {
