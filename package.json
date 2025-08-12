@@ -10,8 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mapbox/polyline": "^1.2.1",
+    "@react-google-maps/api": "^2.20.7",
     "@tailwindcss/vite": "^4.1.11",
     "@untitledui/icons": "^0.0.19",
+    "dayjs": "^1.11.13",
     "dexie": "^4.0.11",
     "dexie-react-hooks": "^1.1.7",
     "file-saver": "^2.0.5",
