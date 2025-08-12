@@ -356,6 +356,14 @@ function App() {
 
             const itemsByDayAndType: Record<string, { activities: string[], items: string[] }> = {}
 
+            if (expRows.length
+             > 0) {
+                expRows.forEach(row => {
+                    const { day } = row
+                    if (!itemsByDayAndType[day]) itemsByDayAndType[day] = { activities: [], items: [] }
+                })
+            }
+
             clRows.forEach(row => {
                 const { day, item, type } = row
 
@@ -375,6 +383,19 @@ function App() {
                     console.warn('Unknown item type:', type)
                 }
             })
+            const existingDays = updatedItinerary.map(entry => entry.day)
+            Object.keys(itemsByDayAndType).forEach(day => {
+                if (!existingDays.includes(day)) {
+                    updatedItinerary.push({
+                        day,
+                        activities: itemsByDayAndType[day].activities,
+                        items: itemsByDayAndType[day].items,
+                        budget: 3500,
+                    })
+                }
+            })
+            updatedItinerary.sort((a, b) => a.day.localeCompare(b.day))
+
             return updatedItinerary.map(entry => {
                 const dayItems = itemsByDayAndType[entry.day]
                 if (!dayItems) {
