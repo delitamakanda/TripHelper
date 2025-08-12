@@ -1,4 +1,5 @@
 import { useState , useEffect } from "react";
+import {Button} from "react-aria-components";
 
 interface BeforeInstallPromptEvent extends Event {
     prompt: () => Promise<void>;
@@ -47,8 +48,10 @@ export default function PWAInstallPrompt() {
     }
 
     return (
-        <div>
-            <button onClick={handleInstall}>Install this app</button>
+        <div className="flex flex-1 justify-around">
+                <Button onClick={handleInstall}>
+                    Add to Home Screen
+                </Button>
         </div>
     );
 }
