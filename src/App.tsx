@@ -8,7 +8,7 @@ import { formatDayLabel } from './utils/formatter'
 import { saveAs } from 'file-saver'
 
 import {firestore, auth } from "./lib/firebase";
-import { doc, setDoc, getDocs, collection, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, writeBatch, getDocs, collection, onSnapshot } from 'firebase/firestore';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import PWAInstallPrompt from "./components/pwa-install-prompt/PWAInstallPrompt.tsx";
 
@@ -75,6 +75,8 @@ function App() {
     const unsubRefs = useRef<Array<() => void>>([])
     const syncIntervalRef = useRef<number | null>(null)
 
+    const isSynching = useRef(false)
+
     const restoreInitialItinerary = () => {
         const defaultItinerary = [
             {
@@ -135,10 +137,11 @@ function App() {
         }
         try {
             setSyncStatus("syncing")
+            const batch = writeBatch(fs)
             for (const day of itinerary) {
                 for (const activity of day.activities) {
                     const id = btoa(encodeURIComponent(`${day.day}|${activity}`));
-                    await setDoc(doc(fs, `users/${uid}/checklist/${id}`), {
+                    batch.set(doc(fs, `users/${uid}/checklist/${id}`), {
                         day: day.day,
                         item: activity,
                         checked: checked[day.day]?.includes(activity) || false,
@@ -148,7 +151,7 @@ function App() {
                 }
                 for (const item of day.items) {
                     const id = btoa(encodeURIComponent(`${day.day}|${item}`));
-                    await setDoc(doc(fs, `users/${uid}/checklist/${id}`), {
+                    batch.set(doc(fs, `users/${uid}/checklist/${id}`), {
                         day: day.day,
                         item: item,
                         checked: checked[day.day]?.includes(item) || false,
@@ -157,12 +160,13 @@ function App() {
                     }, { merge: true })
                 }
                 const expenseId = btoa(encodeURIComponent(`${day.day}`));
-                await setDoc(doc(fs, `users/${uid}/expenses/${expenseId}`), {
+                batch.set(doc(fs, `users/${uid}/expenses/${expenseId}`), {
                     day: day.day,
                     amount: expenses[day.day] || 0,
                     updatedAt: new Date()
                 }, { merge: true })
             }
+            await batch.commit()
             setSyncStatus("ok")
             setTimeout(() => setSyncStatus("idle"), 1200)
         } catch {
@@ -249,7 +253,7 @@ function App() {
             const rows: any = []
             snapshot.forEach(docu => {
                 const d = docu.data();
-                rows.push({id: docu.id, day: d.day, item: d.item, checked: d.checked, updatedAt: d.updateAt ?? 0})
+                rows.push({id: docu.id, day: d.day, item: d.item, checked: d.checked, type: d.type, updatedAt: d.updateAt ?? 0})
             })
             await db.checklist.clear()
             await db.checklist.bulkPut(rows)
@@ -359,24 +363,16 @@ function App() {
 
                 if (!itemsByDayAndType[day]) itemsByDayAndType[day] = { activities: [], items: [] }
 
-                if (type === 'activity' && !itemsByDayAndType[day].activities.includes(item)) {
-                    itemsByDayAndType[day].activities.push(item)
-                } else if (type === 'item' &&!itemsByDayAndType[day].items.includes(item)) {
-                    itemsByDayAndType[day].items.push(item)
-                } else if (!type) {
-                    const dayEntry = prev.find(entry => entry.day === day)
-                    if (dayEntry) {
-                        // fallback to item if type is missing
-                        if (dayEntry.activities.includes(item) && !itemsByDayAndType[day].activities.includes(item)) {
-                            itemsByDayAndType[day].activities.push(item)
-                        } else if(dayEntry.items.includes(item) &&!itemsByDayAndType[day].items.includes(item)) {
-                            itemsByDayAndType[day].items.push(item)
-                        } else if (!itemsByDayAndType[day].items.includes(item)) {
-                            itemsByDayAndType[day].items.push(item)
-                        }
-                    }  else if (!itemsByDayAndType[day].items.includes(item)) {
+                if (type === 'activity') {
+                    if (!itemsByDayAndType[day].activities.includes(item)) {
+                        itemsByDayAndType[day].activities.push(item)
+                    }
+                } else if (type === 'item') {
+                    if (!itemsByDayAndType[day].items.includes(item)) {
                         itemsByDayAndType[day].items.push(item)
                     }
+                } else {
+                    console.warn('Unknown item type:', type)
                 }
             })
             return updatedItinerary.map(entry => {
@@ -390,7 +386,8 @@ function App() {
     }
 
     const syncNow = async () => {
-        if (!uid) return
+        if (!uid || isSynching.current) return
+        isSynching.current = true
         try {
             setSyncStatus("syncing")
             await pushToCloud(uid)
@@ -401,6 +398,7 @@ function App() {
             console.error('Failed to sync cloud', error)
             setSyncStatus("error")
         }
+        isSynching.current = false
     }
 
     useEffect(() => {
@@ -448,7 +446,17 @@ function App() {
         const text = await file.text();
         const data = JSON.parse(text);
         if (data.checklist) {
-            const rows = data.checklist.map((item: any) => ({ id: item.id ?? btoa(encodeURIComponent(`${item.day}|${item.item}`)),...item }));
+            const rows = data.checklist.map((item: any) => {
+                if (!item.type) {
+                    const dayEntry = itinerary.find(entry => entry.day === item.day);
+                    let type = 'item'
+                    if (dayEntry && dayEntry.activities.includes(item.item)) {
+                        type = 'activity'
+                    }
+                    return {id: item.id ?? btoa(encodeURIComponent(`${item.day}|${item.item}`)), ...item, type };
+                }
+                return { id: item.id?? btoa(encodeURIComponent(`${item.day}|${item.item}`)),...item };
+            });
             await db.checklist.clear();
             await db.checklist.bulkPut(rows);
         }
@@ -470,7 +478,12 @@ function App() {
     const toggleItem = async (day: string, item: string) => {
         const isChecked = checked[day]?.includes(item);
         const id = btoa(encodeURIComponent(`${day}|${item}`))
-        await db.checklist.put({ id, day, item, checked: !isChecked, updatedAt: Date.now()})
+        let type: 'activity' | 'item' = 'item'
+        const dayEntry = itinerary.find(entry => entry.day === day);
+        if (dayEntry && dayEntry.activities.includes(item)) {
+            type = 'activity'
+        }
+        await db.checklist.put({ id, day, item, checked: !isChecked, type, updatedAt: Date.now()})
         setChecked(prev => {
             const dayChecked = prev[day] || [];
             return {
@@ -495,9 +508,12 @@ function App() {
     }
 
     const handleDeleteActivity = async (day: string, index: number) => {
-        setItinerary(prev => prev.map(entry => entry.day === day? {...entry, activities: entry.activities.filter((_, i) => i!== index) } : entry))
-        const id = btoa(encodeURIComponent(`${day}|${newActivity[day]}`))
-        await db.checklist.delete(id);
+        const dayEntry = itinerary.find(entry => entry.day === day);
+        const toDelete = dayEntry?.activities[index];
+        if (toDelete) {
+            const id = btoa(encodeURIComponent(`${day}|${toDelete}`))
+            await db.checklist.delete(id);
+        }
     }
 
     const handleAddItem =  async (day: string) => {
