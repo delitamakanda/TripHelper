@@ -11,6 +11,7 @@ import {firestore, auth } from "./lib/firebase";
 import { doc, setDoc, writeBatch, getDocs, collection, onSnapshot } from 'firebase/firestore';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import PWAInstallPrompt from "./components/pwa-install-prompt/PWAInstallPrompt.tsx";
+import ToggleTheme from "./components/toggle-theme/ToggleTheme.tsx";
 
 const fs = firestore;
 
@@ -554,13 +555,14 @@ function App() {
     }
 
 return (
-      <div className="max-w-screen-sm mx-auto px-4 py-6 space-y-6">
-          <h1 className="text-2xl font-bold mb-2 text-center">📅 Planificateur de voyage</h1>
+      <div className="mx-auto px-4 py-6 space-y-6 dark:bg-black dark:text-white">
+          <h1 className="text-2xl font-bold mb-2 text-center dark:text-white">📅 Planificateur de voyage</h1>
+          <ToggleTheme />
 
           {/* days selector */}
           <Card>
               <CardContent className="space-y-3">
-                  <h2 className="text-lg font-semibold">🗓️ Créer plusieurs jours d'affilée</h2>
+                  <h2 className="text-lg font-semibold ">🗓️ Créer plusieurs jours d'affilée</h2>
                   <DateRangeCreator onCreate={(days) => setItinerary(prev => [...prev, ...days])} />
               </CardContent>
           </Card>
@@ -625,7 +627,7 @@ return (
                       <h2 className="text-lg font-semibold">{formatDayLabel(day)}</h2>
                       <div>
                           <p className="text-sm font-medium">Activités :</p>
-                          <ul className="list-disc list-inside text-sm text-gray-700">
+                          <ul className="list-disc list-inside text-sm text-gray-700 dark:text-gray-500">
                               {activities.map((activity, idx) => (
                                   <li key={idx} className="flex items-center justify-between"><span>{activity}</span>
                                       <Button onClick={() => handleDeleteActivity(day, idx)}>❌</Button>
@@ -641,7 +643,7 @@ return (
                           <p className="font-medium text-sm">À emporter :</p>
                           <ul className="space-y-1">
                               {items.map((item, index) => (
-                                  <li key={index} className={`flex items-center justify-between px-3 py-1 rounded-lg border text-sm ${checked[day]?.includes(item) ? "bg-green-100 line-through text-gray-500" : "bg-white"}`}><span>{item}</span>
+                                  <li key={index} className={`flex items-center justify-between px-3 py-1 rounded-lg border text-sm ${checked[day]?.includes(item) ? "bg-green-100 line-through text-gray-500" : "bg-white dark:bg-black"}`}><span>{item}</span>
                                       <div className="flex gap-2">
                                           <Button onClick={() => toggleItem(day, item)}>
                                               {checked[day]?.includes(item) ? "✔️" : "🧳"}

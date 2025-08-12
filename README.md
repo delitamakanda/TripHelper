@@ -11,6 +11,7 @@ Créée avec React, Tailwindcss et Dexie.js pour la base de données locale.
 - Réinitialisation des données avec confirmation 
 - Mode PWA : installable et utilisable offline 
 - Sauvegarde de la devise préférée
+- 🌙 Mode nuit
 
 ### Stack technique
 | Technologie  |              Usage               |
@@ -49,7 +50,6 @@ L'app peut être installée sur smartphone ou tablette :
 
 ### À venir
 - Notifications locales
-- 🌙 Mode nuit 
 - Planificateur de trajets
 
 ### Auteur

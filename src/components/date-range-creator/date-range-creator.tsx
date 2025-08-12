@@ -40,7 +40,7 @@ export function DateRangeCreator({ onCreate } :{ onCreate: (days: Array<{ day: s
         setEndDate('');
     }
     return (
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end dark:text-white">
             <div>
                 <p className="text-sm font-medium mb-1">Début</p>
                 <input type="date" className="border rounded px-2 py-1 text-sm w-full" value={startDate} onChange={e => setStartDate(e.target.value)} />
