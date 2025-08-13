@@ -8,7 +8,7 @@ import { formatDayLabel } from './utils/formatter'
 import { saveAs } from 'file-saver'
 
 import {firestore, auth } from "./lib/firebase";
-import { doc, setDoc, writeBatch, getDocs, collection, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, writeBatch, getDocs, collection, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import PWAInstallPrompt from "./components/pwa-install-prompt/PWAInstallPrompt.tsx";
 import ToggleTheme from "./components/toggle-theme/ToggleTheme.tsx";
@@ -540,6 +540,7 @@ function App() {
         setItinerary(prev => prev.map(entry => entry.day === day? {...entry, activities: entry.activities.filter((_, i) => i!== index) } : entry))
         const id = btoa(encodeURIComponent(`${day}|${activityToDelete}`))
         await db.checklist.delete(id);
+        await deleteDoc(doc(fs, `users/${uid}/checklist/${id}`));
     }
 
     const handleAddItem =  async (day: string) => {
@@ -554,6 +555,7 @@ function App() {
         setItinerary(prev => prev.map(entry => entry.day === day? {...entry, items: entry.items.filter((_, i) => i!== idx && item!== i) } : entry))
         const id = btoa(encodeURIComponent(`${day}|${item}`))
         await db.checklist.delete(id);
+        await deleteDoc(doc(fs, `users/${uid}/checklist/${id}`));
 
     }
 
