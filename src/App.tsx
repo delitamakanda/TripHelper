@@ -13,6 +13,7 @@ import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import PWAInstallPrompt from "./components/pwa-install-prompt/PWAInstallPrompt.tsx";
 import ToggleTheme from "./components/toggle-theme/ToggleTheme.tsx";
 import { useDayPlanNotification } from './hooks/use-dayplan-notifications';
+import RoutePlanner from "./components/route-planner/RoutePlanner";
 
 const fs = firestore;
 
@@ -621,6 +622,8 @@ return (
                   </div>
               </CardContent>
           </Card>
+
+          <RoutePlanner plans={itinerary.map(({ day, activities }) => ({ day, activities }))} />
 
           {/* itinerary */}
           {itinerary.map(({ day, activities, items, budget }) => (

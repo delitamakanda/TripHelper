@@ -13,6 +13,7 @@ Créée avec React, Tailwindcss et Dexie.js pour la base de données locale.
 - Sauvegarde de la devise préférée
 - 🌙 Mode nuit
 - Notifications locales
+- Planificateur de trajets
 
 ### Stack technique
 | Technologie  |              Usage               |
@@ -48,9 +49,6 @@ L'app peut être installée sur smartphone ou tablette :
 ### Export des données
 - Format JSON structuré (checklist + dépenses)
 - Peut être importé sur une autre session/navigateur
-
-### À venir
-- Planificateur de trajets
 
 ### Auteur
 Développé avec ❤️ par Délita pour un usage personnel et éducatif, à l'occasion d'un voyage à Taïwan 🇹🇼
