@@ -23,3 +23,22 @@ dev-dist
 *.njsproj
 *.sln
 *.sw?
+app/*
+.gradle
+*.gradle
+gradlew
+gradlew.bat
+.project
+.settings
+gradle.properties
+
+# Build artifacts
+build/
+out/
+twa-manifest.json
+store_icon.png
+gradle-wrapper.jar
+gradle-wrapper.properties
+manifest-checksum.txt
+android.keystore
+app-release-*

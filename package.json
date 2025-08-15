@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:android": "npm run build && npx @bubblewrap/cli init --manifest=https://triphelper.pages.dev/site.webmanifest",
+    "bubblewrap:build": "bubblewrap build",
+    "bubblewrap:install": "bubblewrap install"
   },
   "dependencies": {
     "@mapbox/polyline": "^1.2.1",

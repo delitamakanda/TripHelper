@@ -11,7 +11,7 @@ export default defineConfig({
       tailwindcss(),
       VitePWA({
           registerType: 'autoUpdate',
-          includeAssets: ['favicon.ico', 'pwa-192x192.png', 'pwa-512x512.png'],
+          includeAssets: ['pwa-192x192.png', 'pwa-512x512.png'],
           devOptions: {
               enabled: true
           },
@@ -22,11 +22,6 @@ export default defineConfig({
               theme_color: '#ffffff',
               background_color: '#ffffff',
               icons: [
-                  {
-                      src: '/favicon.ico',
-                      sizes: 'any',
-                      type: 'image/ico',
-                  },
                   {
                       src: '/pwa-192x192.png',
                       sizes: '192x192',
