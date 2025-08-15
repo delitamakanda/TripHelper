@@ -17,6 +17,8 @@ import RoutePlanner from "./components/route-planner/RoutePlanner";
 
 const fs = firestore;
 
+const currencies: string[] = ['EUR', 'USD', 'GBP', 'JPY', 'CNY', 'AUD', 'CAD', 'CHF', 'SGD', 'HKD', 'KRW', 'TWD']
+
 const initialItinerary = import.meta.env.DEV ? [
     {
         day: "2025-11-30", // Dim 30/11
@@ -72,6 +74,7 @@ function App() {
     const [exchangeRate, setExchangeRate] = useState<number>(0.0256)
     const [loadingRate, setLoadingRate] = useState<boolean>(false)
     const [selectedCurrency, setSelectedCurrency] = useState(() => localStorage.getItem('preferedCurrency') || 'EUR')
+    const [baseCurrency, setBaseCurrency] = useState((localStorage.getItem('baseCurrency') || 'TWD') as string)
     const [currencyValue, setCurrencyValue] = useState<string>("")
     const [uid, setUid] = useState<string | null>(null)
     const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "ok" | "error">("idle")
@@ -181,12 +184,12 @@ function App() {
     const fetchExchangeRate = () => {
         setLoadingRate(true)
         const options = {method: 'GET', headers: {accept: 'application/json'}};
-
-        fetch(`https://api.fastforex.io/fetch-multi?from=${selectedCurrency}&to=TWD&api_key=${import.meta.env.VITE_FASTFOREX_API_KEY}`, options)
+        fetch(`https://v6.exchangerate-api.com/v6/${import.meta.env.VITE_EXCHANGE_RATES_API_KEY}/pair/${selectedCurrency}/${baseCurrency}`, options)
             .then(response => response.json())
             .then(data => {
-                if (data?.results?.TWD) {
-                    setExchangeRate(1 / data.results.TWD)
+                console.log('Exchange rate:', data);
+                if (data?.conversion_rate) {
+                    setExchangeRate(1 / data?.conversion_rate)
                 }
             })
             .catch(() => {
@@ -208,7 +211,8 @@ function App() {
     useEffect(() => {
         // fetchExchangeRate();
         localStorage.setItem('preferedCurrency', selectedCurrency)
-    }, [selectedCurrency])
+        localStorage.setItem('baseCurrency', baseCurrency)
+    }, [selectedCurrency, baseCurrency])
 
     useEffect(() => {
         (async () => {
@@ -597,28 +601,38 @@ return (
               <CardContent className="space-y-4">
                   <h2 className="text-lg font-semibold">💱 Convertisseur de devises</h2>
                   <div className="flex items-center gap-2">
-                      <label className="text-sm">Devise : </label>
+                      <label className="text-sm">Devise depuis : </label>
                       <select className="border rounded px-2 py-1 text-sm" value={selectedCurrency} onChange={e => setSelectedCurrency(e.target.value)}>
                           {
-                              ['EUR', 'USD', 'GBP', 'JPY', 'CNY', 'AUD', 'CAD', 'CHF', 'SGD', 'HKD', 'KRW'].map(currency => (
+                              currencies.map(currency => (
                                   <option key={currency} value={currency}>{currency}</option>
                               ))
                           }
                       </select>
-                      <Button onClick={fetchExchangeRate}>{loadingRate ? '...' : "🔁"}</Button>
+                      <div className="flex items-center gap-2">
+                          <label className="text-sm">vers : </label>
+                          <select className="border rounded px-2 py-1 text-sm" value={baseCurrency} onChange={e => setBaseCurrency(e.target.value)}>
+                              {
+                              currencies.map(currency => (
+                                  <option key={currency} value={currency}>{currency}</option>
+                              ))
+                              }
+                          </select>
+                          <Button onClick={fetchExchangeRate}>{loadingRate ? '...' : "🔁"}</Button>
+                      </div>
                   </div>
                   <div>
-                      <p className="text-xs text-gray-500">1 {selectedCurrency} ≈ {(1 / exchangeRate).toFixed(4)} TWD</p>
+                      <p className="text-xs text-gray-500">1 {selectedCurrency} ≈ {(1 / exchangeRate).toFixed(4)} {baseCurrency}</p>
                       <div className="flex gap-2">
                           <Input type="number" placeholder={`Montant en ${selectedCurrency}`} value={currencyValue} onChange={e => setCurrencyValue(e.target.value)} />
                       </div>
-                      {currencyValue && <p className="text-sm mt-1">≈ {(parseFloat(currencyValue) * (1 / exchangeRate)).toFixed(2)} TWD</p>}
+                      {currencyValue && <p className="text-sm mt-1">≈ {(parseFloat(currencyValue) * (1 / exchangeRate)).toFixed(2)} {baseCurrency}</p>}
                   </div>
 
                   <div>
-                      <p className="text-xs text-gray-500">1 TWD ≈ {exchangeRate.toFixed(4)} {selectedCurrency}</p>
+                      <p className="text-xs text-gray-500">1 {baseCurrency} ≈ {exchangeRate.toFixed(4)} {selectedCurrency}</p>
                       <div className="flex gap-2">
-                          <Input type="number" placeholder="Montant en TWD" value={ntdValue} onChange={e => setNtdValue(e.target.value)} />
+                          <Input type="number" placeholder={`Montant en ${baseCurrency}`} value={ntdValue} onChange={e => setNtdValue(e.target.value)} />
                       </div>
                       {ntdValue && <p className="text-sm mt-1">≈ {(parseFloat(ntdValue) * exchangeRate).toFixed(2)} {selectedCurrency}</p>}
                   </div>
