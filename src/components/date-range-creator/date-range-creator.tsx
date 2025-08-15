@@ -2,8 +2,8 @@ import {useState} from "react";
 import {Button} from "react-aria-components";
 import { db } from '../../db'
 
-export function DateRangeCreator({ onCreate } :{ onCreate: (days: Array<{ day: string, activities: string[], items: string[], budget: number
-}>) => void }) {
+export function DateRangeCreator({ onCreate, currencyCode } : { onCreate: (days: Array<{ day: string, activities: string[], items: string[], budget: number
+}>) => void, currencyCode: string }) {
     const [startDate, setStartDate] = useState<string>('');
     const [endDate, setEndDate] = useState<string >('');
     const [defaultBudget, setDefaultBudget] = useState<number>(3500);
@@ -50,7 +50,7 @@ export function DateRangeCreator({ onCreate } :{ onCreate: (days: Array<{ day: s
                 <input type="date" className="border rounded px-2 py-1 text-sm w-full" value={endDate} onChange={e => setEndDate(e.target.value)} />
             </div>
             <div>
-                <p className="text-sm font-medium mb-1">Budget/jour (NT$)</p>
+                <p className="text-sm font-medium mb-1">Budget/jour ({currencyCode})</p>
                 <input type="number" className="border rounded px-2 py-1 text-sm w-full" value={defaultBudget} onChange={e => setDefaultBudget(parseInt(e.target.value)||0)} />
             </div>
             <div>

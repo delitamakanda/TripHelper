@@ -4,7 +4,7 @@ import { Button, Input } from 'react-aria-components'
 import { DateRangeCreator} from "./components/date-range-creator/date-range-creator.tsx";
 import { Card, CardContent } from './components/card/Card'
 import './App.css'
-import { formatDayLabel } from './utils/formatter'
+import { formatDayLabel, formatCurrencySymbol } from './utils/formatter'
 import { saveAs } from 'file-saver'
 
 import {firestore, auth } from "./lib/firebase";
@@ -187,7 +187,6 @@ function App() {
         fetch(`https://v6.exchangerate-api.com/v6/${import.meta.env.VITE_EXCHANGE_RATES_API_KEY}/pair/${selectedCurrency}/${baseCurrency}`, options)
             .then(response => response.json())
             .then(data => {
-                console.log('Exchange rate:', data);
                 if (data?.conversion_rate) {
                     setExchangeRate(1 / data?.conversion_rate)
                 }
@@ -572,7 +571,7 @@ return (
           <Card>
               <CardContent className="space-y-3">
                   <h2 className="text-lg font-semibold ">🗓️ Créer plusieurs jours d'affilée</h2>
-                  <DateRangeCreator onCreate={(days) => setItinerary(prev => [...prev, ...days])} />
+                  <DateRangeCreator onCreate={(days) => setItinerary(prev => [...prev, ...days])} currencyCode={baseCurrency} />
               </CardContent>
           </Card>
 
@@ -681,11 +680,11 @@ return (
                       </div>
 
                       <div className="space-y-1">
-                          <p className="text-sm text-gray-500 mt-2">💰 Budget : <strong>{budget.toLocaleString()} NT$</strong> (~{convertToCurrency(budget)} {selectedCurrency})</p>
-                          <label>Dépenses (NT$)</label>
+                          <p className="text-sm text-gray-500 mt-2">💰 Budget : <strong>{formatCurrencySymbol(+budget, baseCurrency, navigator.language)}</strong> (~{convertToCurrency(budget)} {selectedCurrency})</p>
+                          <label>Dépenses ({baseCurrency})</label>
                           <input type="number" value={expenses[day] || ""} onChange={e => handleExpenseChange(day, +e.target.value)} />
                           <p className="text-xs text-gray-600">
-                              {expenses[day] !== undefined && `Écart : ${expenses[day] - budget} NT$ (${convertToCurrency(expenses[day] - budget)} ${selectedCurrency}) ${expenses[day] > budget ? '🚨' : '✅'}`}
+                              {expenses[day] !== undefined && `Écart : ${expenses[day] - budget} ${baseCurrency} (${convertToCurrency(expenses[day] - budget)} ${selectedCurrency}) ${expenses[day] > budget ? '🚨' : '✅'}`}
                           </p>
 
                       </div>
@@ -696,9 +695,9 @@ return (
           <Card>
               <CardContent className="space-y-2">
                   <h2 className="text-lg font-semibold text-center">📊 Récapitulatif Global</h2>
-                  <p className="text-sm">Budget total : <strong>{totalBudget.toLocaleString()} NT$</strong> (~{convertToCurrency(totalBudget)} {selectedCurrency})</p>
-                  <p className="text-sm">Dépenses totales : <strong>{totalExpenses.toLocaleString()} NT$</strong> (~{convertToCurrency(totalExpenses)} {selectedCurrency})</p>
-                  <p className="text-sm">Écart global : <strong>{remainingBudget} NT$</strong> ({convertToCurrency(remainingBudget)} {selectedCurrency}) {remainingBudget > 0 ? "🚨 Dépassement" : remainingBudget < 0 ? "✅ Économie" : "👌 Parfaitement calé"}</p>
+                  <p className="text-sm">Budget total : <strong>{formatCurrencySymbol(+totalBudget, baseCurrency, navigator.language)} </strong> (~{convertToCurrency(totalBudget)} {selectedCurrency})</p>
+                  <p className="text-sm">Dépenses totales : <strong>{formatCurrencySymbol(totalExpenses, baseCurrency, navigator.language)}</strong> (~{convertToCurrency(totalExpenses)} {selectedCurrency})</p>
+                  <p className="text-sm">Écart global : <strong>{formatCurrencySymbol(+remainingBudget, baseCurrency, navigator.language)}</strong> ({convertToCurrency(remainingBudget)} {selectedCurrency}) {remainingBudget > 0 ? "🚨 Dépassement" : remainingBudget < 0 ? "✅ Économie" : "👌 Parfaitement calé"}</p>
               </CardContent>
           </Card>
           <PWAInstallPrompt />
