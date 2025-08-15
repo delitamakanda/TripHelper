@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { GoogleMap, LoadScript, DirectionsRenderer } from "@react-google-maps/api";
+import { GoogleMap, LoadScript, DirectionsRenderer, Marker } from "@react-google-maps/api";
 import dayjs from "dayjs";
 import { getGeolocation } from "../../services/googleRouting";
 import {Card, CardContent} from "../card/Card";
@@ -21,6 +21,27 @@ const LIBRAIRIES: ["places"] = ["places"];
 const MODES = ["DRIVING", "WALKING", "BICYCLING", "TRANSIT"] as const;
 type TravelMode = typeof MODES[number];
 
+const getCurrentLocation = (): Promise<google.maps.LatLngLiteral> => {
+    return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+            reject(new Error("Geolocation is not supported by this browser."));
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                resolve({
+                    lat: position.coords.latitude,
+                    lng: position.coords.longitude,
+                });
+            },
+            (error) => {
+                reject(error)
+            },
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        )
+    })
+}
+
 export default function TripPlanner({
     apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
     plans,
@@ -34,6 +55,8 @@ export default function TripPlanner({
     const [summary, setSummary] = useState<{ distanceKm: number; durationMin: number }>({ distanceKm: 0, durationMin: 0 });
 
     const day = useMemo(() => plans.find(plan => plan.day === selectedDay), [plans, selectedDay]);
+    const [useCurrentLocation, setUseCurrentLocation] = useState(false);
+    const [currentLocation, setCurrentLocation] = useState<google.maps.LatLngLiteral | null>(null);
 
     async function ComputeRoute() {
         if (!day || day.activities.length < 2) {
@@ -42,10 +65,21 @@ export default function TripPlanner({
         }
         setLoading(true);
         try {
+            let origin;
             const coords = await Promise.all(day.activities.map(name => getGeolocation(`${name} Taipei`, apiKey)));
-            const origin = coords[0];
+            if (useCurrentLocation) {
+                try {
+                    origin = await getCurrentLocation();
+                    setCurrentLocation(origin);
+                } catch (error) {
+                    console.error('Error getting current location:', error);
+                    origin = coords[0];
+                }
+            } else {
+                origin = coords[0];
+            }
             const destinations = coords[coords.length - 1];
-            const waypoints = coords.slice(1, -1).map(coord => ({ location: coord }));
+            const waypoints = coords.slice(useCurrentLocation ? 0 : 1, -1).map(coord => ({ location: coord }));
             const service = new google.maps.DirectionsService();
             const result = await service.route({
                 origin: origin,
@@ -55,7 +89,6 @@ export default function TripPlanner({
                 travelMode: google.maps.TravelMode[selectedMode],
                 transitOptions: selectedMode === 'TRANSIT' ? { departureTime: new Date(departureTime) } : undefined,
                 unitSystem: google.maps.UnitSystem.METRIC,
-                region: 'TW',
             })
             setDirections(result);
             let distanceMeters = 0;
@@ -77,6 +110,7 @@ export default function TripPlanner({
             ComputeRoute();
         }
     }, [selectedDay, selectedMode, departureTime]);
+
 
     return (
         <Card>
@@ -109,6 +143,10 @@ export default function TripPlanner({
                         <Input type="datetime-local" className="border rounded px-2 py-1 text-sm w-full" value={dayjs(departureTime).format("YYYY-MM-DDTHH:mm")} onChange={e => setDepartureTime(dayjs(e.target.value).toISOString())} />
                     </div>
                 </div>
+                <div className="flex items-center mt-2">
+                    <input type="checkbox" className="mr-2" id="use-current-location" checked={useCurrentLocation} onChange={e => setUseCurrentLocation(e.target.checked)} />
+                    <label htmlFor="use-current-location" className="text-sm">Utiliser votre position actuelle</label>
+                </div>
                 <div className="flex items-center gap-2">
                     <button onClick={ComputeRoute} disabled={loading}>{loading ? 'Calcul...' : "Recalculer"}</button>
                     <p className="text-sm text-gray-600">
@@ -118,8 +156,11 @@ export default function TripPlanner({
 
                 <LoadScript googleMapsApiKey={apiKey} libraries={LIBRAIRIES}>
                     <GoogleMap mapContainerStyle={mapContainerStyle}
-                        center={defaultCenter} zoom={12}>
+                        center={defaultCenter || currentLocation} zoom={12}>
                         {directions && <DirectionsRenderer directions={directions} />}
+                        {currentLocation && useCurrentLocation && <Marker position={currentLocation} icon={{
+                            url: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+                        }} />}
                     </GoogleMap>
                 </LoadScript>
 
