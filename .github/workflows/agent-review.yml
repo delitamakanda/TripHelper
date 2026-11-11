@@ -1,0 +1,91 @@
+# Boucle de revue : dans une pull request, commente `@claude …` (commentaire
+# général, commentaire de ligne ou revue) pour que l'agent applique tes retours
+# sur la branche de la PR. Seules les personnes ayant accès en écriture au
+# dépôt peuvent déclencher l'agent.
+name: Agent – retours de revue
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  PLAYWRIGHT_MCP_VERSION: '0.0.84'
+
+jobs:
+  respond:
+    if: |
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))
+    runs-on: ubuntu-latest
+    environment: claude
+    timeout-minutes: 60
+    concurrency:
+      group: agent-review-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Se placer sur la branche de la PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          R: ${{ github.repository }}
+          PR: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          read -r head_repo head_ref < <(gh api "repos/$R/pulls/$PR" --jq '"\(.head.repo.full_name) \(.head.ref)"')
+          # Le code de la PR va être installé et exécuté avec les secrets de l'environnement `claude` :
+          # on refuse les PR venant d'un fork.
+          if [ "$head_repo" != "$R" ]; then
+            echo "::error::PR #$PR issue d'un fork ($head_repo) : agent non lancé."
+            exit 1
+          fi
+          git fetch --depth=50 origin "+refs/heads/$head_ref:refs/remotes/origin/$head_ref"
+          git checkout -B "$head_ref" "origin/$head_ref"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Installer le navigateur (MCP Playwright)
+        run: |
+          npm install -g "@playwright/mcp@$PLAYWRIGHT_MCP_VERSION"
+          playwright-mcp install-browser --with-deps chromium
+
+      - name: Démarrer l'app (Vite)
+        run: bash scripts/agent/start-app.sh
+
+      - uses: anthropics/claude-code-action@v1
+        env:
+          BASE_REF: origin/${{ github.event.repository.default_branch || 'main' }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+          claude_args: |
+            --model ${{ vars.AGENT_MODEL || 'sonnet' }}
+            --max-turns 80
+            --mcp-config .github/agent/mcp.json
+            --append-system-prompt "Respecte CLAUDE.md et AGENTS.md. L'app tourne déjà sur http://localhost:5173 (Vite en mode dev, rechargé à chaque modification, itinéraire de démo affiché ; pas de backend : données dans IndexedDB via Dexie ; Firebase, les taux de change et Google Maps sont injoignables depuis le navigateur, c'est normal). Vérifie toute modification d'écran dans le navigateur avec les outils mcp__playwright, en desktop et en mobile (390x844), en ne naviguant que vers l'app locale. Avant de pousser, fais passer node scripts/agent/check-changed.mjs --check (tsc et ESLint sur les lignes modifiées uniquement), bash scripts/agent/test.sh et npm run build. Ne corrige pas les erreurs ESLint préexistantes hors du périmètre de la PR. Ne modifie jamais .github/ ni .agent-out/. Réponds en français."
+            --allowedTools "Skill,Bash(node scripts/agent/check-changed.mjs:*),Bash(bash scripts/agent/test.sh:*),Bash(npm run build:*),Bash(npx eslint:*),Bash(npx tsc:*),mcp__playwright"
+            --disallowedTools "mcp__playwright__browser_run_code_unsafe,mcp__playwright__browser_evaluate,mcp__playwright__browser_file_upload"

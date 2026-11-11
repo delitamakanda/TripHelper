@@ -43,5 +43,7 @@ manifest-checksum.txt
 android.keystore
 app-release-*
 
+# Agents (workflow agentique)
+.agent-out/
 .env
 .env.local

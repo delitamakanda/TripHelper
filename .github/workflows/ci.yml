@@ -1,0 +1,36 @@
+# CI : types + ESLint sur les lignes modifiées, tests node:test, build de production.
+# ESLint n'est pas lancé sur tout le dépôt : ≈20 erreurs préexistantes (voir CLAUDE.md).
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  # Les PR ouvertes par l'agent (GITHUB_TOKEN) ne déclenchent pas `pull_request` :
+  # agent-implement.yml lance ce workflow explicitement sur leur branche.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Types + ESLint (lignes modifiées)
+        env:
+          BASE_REF: origin/${{ github.base_ref || github.event.repository.default_branch || 'main' }}
+        run: node scripts/agent/check-changed.mjs --check
+      - name: Tests
+        run: bash scripts/agent/test.sh
+      - name: Build
+        run: npm run build
