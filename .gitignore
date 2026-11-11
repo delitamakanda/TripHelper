@@ -42,3 +42,6 @@ gradle-wrapper.properties
 manifest-checksum.txt
 android.keystore
 app-release-*
+
+.env
+.env.local
