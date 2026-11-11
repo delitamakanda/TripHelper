@@ -1,4 +1,4 @@
-import {useRef, useState,  useEffect} from 'react'
+import {useRef, useState, useEffect, useCallback} from 'react'
 import { db } from './db'
 import { Button, Input } from 'react-aria-components'
 import { DateRangeCreator} from "./components/date-range-creator/date-range-creator.tsx";
@@ -7,9 +7,10 @@ import './App.css'
 import { formatDayLabel, formatCurrencySymbol } from './utils/formatter'
 import { saveAs } from 'file-saver'
 
-import {firestore, auth } from "./lib/firebase";
-import { doc, setDoc, writeBatch, getDocs, collection, onSnapshot, deleteDoc } from 'firebase/firestore';
-import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import {firestore } from "./lib/firebase";
+import { doc, writeBatch } from 'firebase/firestore';
+import { useCloudSync, loadLocalRows } from './hooks/use-cloud-sync';
+import { applyRowsToItinerary, groupChecked, groupExpenses, isLive, planImport, type ChecklistRow, type ExpenseRow } from './lib/sync-merge';
 import PWAInstallPrompt from "./components/pwa-install-prompt/PWAInstallPrompt.tsx";
 import ToggleTheme from "./components/toggle-theme/ToggleTheme.tsx";
 import { useExchangeRate } from './hooks/use-exchange-rate';
@@ -78,12 +79,20 @@ function App() {
     // rate = nombre de baseCurrency pour 1 selectedCurrency (null = taux inconnu)
     const { rate, loading: loadingRate, message: rateMessage, refresh: fetchExchangeRate } = useExchangeRate(selectedCurrency, baseCurrency)
     const [currencyValue, setCurrencyValue] = useState<string>("")
-    const [uid, setUid] = useState<string | null>(null)
-    const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "ok" | "error">("idle")
-    const unsubRefs = useRef<Array<() => void>>([])
-    const syncIntervalRef = useRef<number | null>(null)
+    const itineraryRef = useRef(itinerary)
+    useEffect(() => {
+        itineraryRef.current = itinerary
+    }, [itinerary])
 
-    const isSynching = useRef(false)
+    const handleCloudData = useCallback((checklistRows: ChecklistRow[], expenseRows: ExpenseRow[]) => {
+        setChecked(groupChecked(checklistRows))
+        setExpenses(groupExpenses(expenseRows))
+        setItinerary(prev => applyRowsToItinerary(prev, checklistRows, expenseRows))
+    }, [])
+    const { uid, syncStatus, syncMessage, syncNow, deleteChecklistEntry, resetData } = useCloudSync({
+        onData: handleCloudData,
+        getItinerary: () => itineraryRef.current,
+    })
 
     const restoreInitialItinerary = () => {
         const defaultItinerary = [
@@ -144,7 +153,7 @@ function App() {
             return
         }
         try {
-            setSyncStatus("syncing")
+            const now = Date.now()
             const batch = writeBatch(fs)
             for (const day of itinerary) {
                 for (const activity of day.activities) {
@@ -154,7 +163,7 @@ function App() {
                         item: activity,
                         checked: checked[day.day]?.includes(activity) || false,
                         type: 'activity',
-                        updatedAt: new Date()
+                        updatedAt: now
                     }, { merge: true })
                 }
                 for (const item of day.items) {
@@ -164,22 +173,20 @@ function App() {
                         item: item,
                         checked: checked[day.day]?.includes(item) || false,
                         type: 'item',
-                        updatedAt: new Date()
+                        updatedAt: now
                     }, { merge: true })
                 }
                 const expenseId = btoa(encodeURIComponent(`${day.day}`));
                 batch.set(doc(fs, `users/${uid}/expenses/${expenseId}`), {
                     day: day.day,
                     amount: expenses[day.day] || 0,
-                    updatedAt: new Date()
+                    updatedAt: now
                 }, { merge: true })
             }
             await batch.commit()
-            setSyncStatus("ok")
-            setTimeout(() => setSyncStatus("idle"), 1200)
+            void syncNow()
         } catch {
             console.error('Failed to sync initial itinerary to Firestore')
-            setSyncStatus("error")
         }
     }
 
@@ -199,256 +206,32 @@ function App() {
     }, [selectedCurrency, baseCurrency])
 
     useEffect(() => {
-        (async () => {
-            // Auth anonyme Firebase
-            onAuthStateChanged(auth, async (user) => {
-                if (user) {
-                    setUid(user.uid);
-                    attachRealtimeListeners(user.uid);
-                } else {
-                    await signInAnonymously(auth).catch(console.error);
-                }
-            });
-
-            // Dexie -> états UI
-            const checklistData = await db.checklist.toArray();
-            const groupedChecklist = checklistData.reduce((acc, curr) => {
-                acc[curr.day] = acc[curr.day] || [];
-                if (curr.checked) acc[curr.day].push(curr.item);
-                return acc;
-            }, {} as Record<string, string[]>);
-            setChecked(groupedChecklist);
-
-            const expensesData = await db.expenses.toArray();
-            const groupedExpenses = expensesData.reduce((acc, curr) => {
-                acc[curr.day] = curr.amount;
-                return acc;
-            }, {} as Record<string, number>);
-            setExpenses(groupedExpenses);
-        })();
-
-        return () => {
-            unsubRefs.current.forEach(off => off());
-            if (syncIntervalRef.current) window.clearInterval(syncIntervalRef.current);
-        };
-
-
+        // Dexie -> états UI (les lignes supprimées sont filtrées)
+        loadLocalRows().then(({ checklist, expenses }) => {
+            setChecked(groupChecked(checklist));
+            setExpenses(groupExpenses(expenses));
+        }).catch(console.error);
     }, []);
 
-    function attachRealtimeListeners(uid: string) {
-        unsubRefs.current.forEach(off => off());
-        unsubRefs.current = []
-        const checklistCol = collection(fs, `users/${uid}/checklist`);
-        const expensesCol = collection(fs, `users/${uid}/expenses`);
-
-        const off1 = onSnapshot(checklistCol, async (snapshot) => {
-            const rows: any = []
-            snapshot.forEach(docu => {
-                const d = docu.data();
-                rows.push({id: docu.id, day: d.day, item: d.item, checked: d.checked, type: d.type, updatedAt: d.updateAt ?? 0})
-            })
-            await db.checklist.clear()
-            await db.checklist.bulkPut(rows)
-            const groupedChecklist = rows.reduce((acc: any, curr: any) => {
-                acc[curr.day] = acc[curr.day] || [];
-                if (curr.checked) acc[curr.day].push(curr.item);
-                return acc;
-            }, {} as Record<string, string[]>);
-            setChecked(groupedChecklist);
-        })
-
-        const off2 = onSnapshot(expensesCol, async (snapshot) => {
-            const rows: any = []
-            snapshot.forEach(docu => {
-                const d = docu.data();
-                rows.push({id: docu.id, day: d.day, amount: d.amount, updatedAt: d.updatedAt?? 0})
-            })
-            await db.expenses.clear()
-            await db.expenses.bulkPut(rows)
-            const groupedExpenses = rows.reduce((acc: any, curr: any) => {
-                acc[curr.day] = curr.amount;
-                return acc;
-            }, {} as Record<string, number>);
-            setExpenses(groupedExpenses);
-        })
-        unsubRefs.current.push(off1, off2);
-    }
-
-    const pushToCloud = async (uid: string) => {
-        const checklist = await db.checklist.toArray();
-        const expensesRows = await db.expenses.toArray();
-        for (const row of checklist) {
-            if (!row.item || row.item.trim() === '') {
-                continue
-            }
-            const id = row.id ?? btoa(encodeURIComponent(`${row.day}|${row.item}`))
-            let itemType = row.type
-            if (!itemType) {
-                const dayEntry = itinerary.find(entry => entry.day === row.day);
-                if(dayEntry) {
-                    itemType = dayEntry.activities.includes(row.item)? 'activity' : 'item';
-                } else {
-                    itemType = 'item';
-                }
-            }
-            await setDoc(doc(fs, `users/${uid}/checklist/${id}`), {
-                day: row.day,
-                item: row.item,
-                checked: row.checked,
-                type: itemType,
-                updatedAt: Date.now() || row.updatedAt,
-            }, {merge: true})
-        }
-        for (const row of expensesRows) {
-            const id = row.id ?? btoa(encodeURIComponent(`${row.day}`))
-            await setDoc(doc(fs, `users/${uid}/expenses/${id}`), {
-                day: row.day,
-                amount: row.amount,
-                updatedAt: Date.now() || row.updatedAt,
-            }, {merge: true})
-        }
-    }
-
-    const syncCloud = async (uid: string) => {
-        const snapCheckList = await getDocs(collection(fs, `users/${uid}/checklist`))
-        const clRows: any[] = []
-        snapCheckList.forEach(doc => {
-            const d = doc.data();
-            if (d.item && d.item.trim() !== '') {
-                clRows.push({ id: doc.id,...doc.data()})
-            }
-        })
-        await db.checklist.clear()
-        await db.checklist.bulkPut(clRows)
-
-        const snapExpenses = await getDocs(collection(fs, `users/${uid}/expenses`))
-        const expRows: any[] = []
-        snapExpenses.forEach(doc => {
-            expRows.push({id: doc.id, ...doc.data()})
-        })
-        await db.expenses.clear()
-        await db.expenses.bulkPut(expRows)
-
-        const groupedChecklist = clRows.reduce((acc: any, curr: any) => {
-            acc[curr.day] = acc[curr.day] || [];
-            if (curr.checked) acc[curr.day].push(curr.item);
-            return acc;
-        }, {} as Record<string, string[]>);
-        setChecked(groupedChecklist);
-
-        const groupedExpenses = expRows.reduce((acc: any, curr: any) => {
-            acc[curr.day] = curr.amount;
-            return acc;
-        }, {} as Record<string, number>);
-        setExpenses(groupedExpenses);
-
-        // update itinerary with activities and items
-        setItinerary(prev => {
-            const updatedItinerary = [...prev]
-
-            const itemsByDayAndType: Record<string, { activities: string[], items: string[] }> = {}
-
-            if (expRows.length
-             > 0) {
-                expRows.forEach(row => {
-                    const { day } = row
-                    if (!itemsByDayAndType[day]) itemsByDayAndType[day] = { activities: [], items: [] }
-                })
-            }
-
-            clRows.forEach(row => {
-                const { day, item, type } = row
-
-                if (!item || item.trim() === '') return
-
-                if (!itemsByDayAndType[day]) itemsByDayAndType[day] = { activities: [], items: [] }
-
-                if (type === 'activity') {
-                    if (!itemsByDayAndType[day].activities.includes(item)) {
-                        itemsByDayAndType[day].activities.push(item)
-                    }
-                } else if (type === 'item') {
-                    if (!itemsByDayAndType[day].items.includes(item)) {
-                        itemsByDayAndType[day].items.push(item)
-                    }
-                } else {
-                    console.warn('Unknown item type:', type)
-                }
-            })
-            const existingDays = updatedItinerary.map(entry => entry.day)
-            Object.keys(itemsByDayAndType).forEach(day => {
-                if (!existingDays.includes(day)) {
-                    updatedItinerary.push({
-                        day,
-                        activities: itemsByDayAndType[day].activities,
-                        items: itemsByDayAndType[day].items,
-                        budget: 3500,
-                    })
-                }
-            })
-            updatedItinerary.sort((a, b) => a.day.localeCompare(b.day))
-
-            return updatedItinerary.map(entry => {
-                const dayItems = itemsByDayAndType[entry.day]
-                if (!dayItems) {
-                    return entry
-                }
-                return {...entry, activities: dayItems.activities.length > 0 ? dayItems.activities : entry.activities, items: dayItems.items.length > 0? dayItems.items : entry.items}
-            })
-        })
-    }
-
-    const syncNow = async () => {
-        if (!uid || isSynching.current) return
-        isSynching.current = true
-        try {
-            setSyncStatus("syncing")
-            await pushToCloud(uid)
-            await syncCloud(uid)
-            setSyncStatus("ok")
-            setTimeout(() => setSyncStatus("idle"), 1200)
-        } catch (error) {
-            console.error('Failed to sync cloud', error)
-            setSyncStatus("error")
-        }
-        isSynching.current = false
-    }
-
-    useEffect(() => {
-        if (!uid) return
-        syncNow()
-        if (syncIntervalRef.current) {
-            window.clearInterval(syncIntervalRef.current)
-        }
-        syncIntervalRef.current = window.setInterval(() => syncNow(), 300000) // 5 minutes
-
-        const onFocus = () => syncNow()
-        const onVisible = () => {
-            if (document.visibilityState === 'visible') syncNow()
-        }
-        window.addEventListener('focus', onFocus)
-        document.addEventListener('visibilitychange', onVisible)
-        return () => {
-            window.removeEventListener('focus', onFocus)
-            document.removeEventListener('visibilitychange', onVisible)
-            if (syncIntervalRef.current) window.clearInterval(syncIntervalRef.current)
-        }
-    }, [uid]);
-
     const exportData = async () => {
-        const checklist = await db.checklist.toArray();
-        const expenses = await db.expenses.toArray();
+        const { checklist: allChecklist, expenses: allExpenses } = await loadLocalRows();
+        const checklist = allChecklist.filter(isLive);
+        const expenses = allExpenses.filter(isLive);
         const blob = new Blob([JSON.stringify({checklist, expenses}, null, 2)], {type: 'application/json'});
         saveAs(blob, `trip-helper-${new Date().toISOString().split('T')[0]}.json`);
     }
 
     const clearData = async () => {
-        const confirmClear = window.confirm("Voulez-vous vraiment effacer les données?")
+        const confirmClear = window.confirm("Voulez-vous vraiment effacer les données, y compris la synchronisation cloud ?")
         if (!confirmClear) {
             return
         }
-        await db.checklist.clear()
-        await db.expenses.clear()
+        try {
+            // pierres tombales locales + reset cloud mis en attente si hors ligne
+            await resetData()
+        } catch (error) {
+            console.error('Failed to reset data', error)
+        }
         setChecked({})
         setExpenses({})
     }
@@ -457,35 +240,22 @@ function App() {
         const confirmImport = window.confirm("Importer ce fichier va remplacer toutes vos données actuelles. Continuer ?");
         if (!confirmImport) return;
         const text = await file.text();
-        const data = JSON.parse(text);
-        if (data.checklist) {
-            const rows = data.checklist.map((item: any) => {
-                if (!item.type) {
-                    const dayEntry = itinerary.find(entry => entry.day === item.day);
-                    let type = 'item'
-                    if (dayEntry && dayEntry.activities.includes(item.item)) {
-                        type = 'activity'
-                    }
-                    return {id: item.id ?? btoa(encodeURIComponent(`${item.day}|${item.item}`)), ...item, type };
-                }
-                return { id: item.id?? btoa(encodeURIComponent(`${item.day}|${item.item}`)),...item };
-            });
-            await db.checklist.clear();
-            await db.checklist.bulkPut(rows);
+        let data: { checklist?: unknown; expenses?: unknown };
+        try {
+            data = JSON.parse(text);
+        } catch {
+            window.alert("Fichier invalide : impossible de lire le JSON.");
+            return;
         }
-        if (data.expenses) {
-            const rows = data.expenses.map((item: any) => ({ id: item.id ?? btoa(encodeURIComponent(item.day)),...item }));
-            await db.expenses.clear();
-            await db.expenses.bulkPut(rows);
-        }
-        const groupedChecklist = (data.checklist || []).reduce((acc: any, curr: any) => {
-            acc[curr.day] = acc[curr.day] || [];
-            if (curr.checked) acc[curr.day].push(curr.item);
-            return acc;
-        }, {} as Record<string, string[]>);
-        setChecked(groupedChecklist);
-        const groupedExpenses = (data.expenses || []).reduce((acc: any, curr: any) => { acc[curr.day] = curr.amount; return acc; }, {} as Record<string, number>);
-        setExpenses(groupedExpenses);
+        // Remplacement : les lignes absentes du fichier deviennent des pierres tombales (propagées au cloud)
+        const plan = planImport(await loadLocalRows(), data ?? {}, Date.now(), (day, item) =>
+            itinerary.find(entry => entry.day === day)?.activities.includes(item) ? 'activity' : 'item');
+        await db.checklist.bulkPut(plan.checklist);
+        await db.expenses.bulkPut(plan.expenses);
+        const { checklist, expenses } = await loadLocalRows();
+        setChecked(groupChecked(checklist));
+        setExpenses(groupExpenses(expenses));
+        void syncNow();
     };
 
     const toggleItem = async (day: string, item: string) => {
@@ -526,9 +296,8 @@ function App() {
             return
         }
         setItinerary(prev => prev.map(entry => entry.day === day? {...entry, activities: entry.activities.filter((_, i) => i!== index) } : entry))
-        const id = btoa(encodeURIComponent(`${day}|${activityToDelete}`))
-        await db.checklist.delete(id);
-        await deleteDoc(doc(fs, `users/${uid}/checklist/${id}`));
+        // pierre tombale locale, propagée au cloud dès que la synchro est possible
+        await deleteChecklistEntry(day, activityToDelete, 'activity');
     }
 
     const handleAddItem =  async (day: string) => {
@@ -541,10 +310,7 @@ function App() {
 
     const handleDeleteItem =  async (day: string, item: string | number, idx: number) => {
         setItinerary(prev => prev.map(entry => entry.day === day? {...entry, items: entry.items.filter((_, i) => i!== idx && item!== i) } : entry))
-        const id = btoa(encodeURIComponent(`${day}|${item}`))
-        await db.checklist.delete(id);
-        await deleteDoc(doc(fs, `users/${uid}/checklist/${id}`));
-
+        await deleteChecklistEntry(day, String(item), 'item');
     }
 
 return (
@@ -567,6 +333,7 @@ return (
                   <div className="flex gap-2">
                       <button onClick={syncNow} disabled={!uid || syncStatus === 'syncing'}>{syncStatus === "syncing" ? "🔄 Synchronisation…" : syncStatus === "ok" ? "✅ Sync OK" : syncStatus === "error" ? "⚠️ Erreur" : "🔁 Synchroniser maintenant"}</button>
                   </div>
+                  {syncMessage && <p role="status" aria-live="polite" className="text-xs text-gray-600 dark:text-gray-300">{syncMessage}</p>}
                   <div>
                       <input type="file" accept="application/json" onChange={(e) => e.target.files?.[0] && importData(e.target.files[0])} />
                       <Button onClick={exportData}>📤 Exporter</Button>

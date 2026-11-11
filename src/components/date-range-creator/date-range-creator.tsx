@@ -1,6 +1,7 @@
 import {useState} from "react";
 import {Button} from "react-aria-components";
 import { db } from '../../db'
+import { expenseId } from '../../lib/sync-merge'
 
 export function DateRangeCreator({ onCreate, currencyCode } : { onCreate: (days: Array<{ day: string, activities: string[], items: string[], budget: number
 }>) => void, currencyCode: string }) {
@@ -27,14 +28,14 @@ export function DateRangeCreator({ onCreate, currencyCode } : { onCreate: (days:
                 budget: defaultBudget,
             });
         }
-        const expenseItems = output.map(item => ({
-            id: btoa(encodeURIComponent(`${item.day}|`)),
-            day: item.day,
-            amount: 0,
-            updatedAt: Date.now()
-        }));
+        // même id que App.tsx (un seul enregistrement par jour) ; on n'écrase pas une dépense existante
+        const ids = output.map(item => expenseId(item.day));
+        const existing = await db.expenses.bulkGet(ids);
+        const expenseItems = output
+            .map((item, i) => ({ id: ids[i], day: item.day, amount: 0, updatedAt: Date.now() }))
+            .filter((_, i) => !existing[i] || existing[i]?.deleted === true);
 
-        await db.expenses.bulkAdd(expenseItems);
+        await db.expenses.bulkPut(expenseItems);
         onCreate(output);
         setStartDate('');
         setEndDate('');
