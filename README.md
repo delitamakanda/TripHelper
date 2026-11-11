@@ -5,7 +5,7 @@ Créée avec React, Tailwindcss et Dexie.js pour la base de données locale.
 ### Fonctionnalités
 - Itinéraire journalier avec activités, objets à emporter et dépenses prévues
 - Suivi des dépenses réelles jour par jour 
-- Convertisseur de devises (NTD ⇄ EUR, USD, JPY, KRW, etc.) via Fastforex API 
+- Convertisseur de devises (NTD ⇄ EUR, USD, JPY, KRW, etc.) via exchangerate-api (taux chargé automatiquement, dernier taux connu conservé hors ligne)
 - Base de données locale avec Dexie.js (IndexedDB)
 - Export & import des données au format JSON 
 - Réinitialisation des données avec confirmation 
@@ -20,7 +20,7 @@ Créée avec React, Tailwindcss et Dexie.js pour la base de données locale.
 |:------------:|:--------------------------------:|
 |   React 19   |             Frontend             |
 |   Dexie.js   | Base de données locale (offline) |
-| FastForex    | API Taux de change en temps réel |
+| exchangerate-api | API Taux de change (cache local) |
 | FileSaver.js |         Export des datas         |
 |     Vite     |           Build front            |
 

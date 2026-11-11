@@ -12,6 +12,7 @@ import { doc, setDoc, writeBatch, getDocs, collection, onSnapshot, deleteDoc } f
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import PWAInstallPrompt from "./components/pwa-install-prompt/PWAInstallPrompt.tsx";
 import ToggleTheme from "./components/toggle-theme/ToggleTheme.tsx";
+import { useExchangeRate } from './hooks/use-exchange-rate';
 import { useDayPlanNotification } from './hooks/use-dayplan-notifications';
 import RoutePlanner from "./components/route-planner/RoutePlanner";
 
@@ -71,10 +72,10 @@ function App() {
     const [newItem, setNewItem] = useState<Record<string, string>>({})
     const [newActivity, setNewActivity] = useState<Record<string, string>>({})
     const [ntdValue, setNtdValue] = useState<string>("")
-    const [exchangeRate, setExchangeRate] = useState<number>(0.0256)
-    const [loadingRate, setLoadingRate] = useState<boolean>(false)
     const [selectedCurrency, setSelectedCurrency] = useState(() => localStorage.getItem('preferedCurrency') || 'EUR')
     const [baseCurrency, setBaseCurrency] = useState((localStorage.getItem('baseCurrency') || 'TWD') as string)
+    // rate = nombre de baseCurrency pour 1 selectedCurrency (null = taux inconnu)
+    const { rate, loading: loadingRate, message: rateMessage, refresh: fetchExchangeRate } = useExchangeRate(selectedCurrency, baseCurrency)
     const [currencyValue, setCurrencyValue] = useState<string>("")
     const [uid, setUid] = useState<string | null>(null)
     const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "ok" | "error">("idle")
@@ -181,26 +182,10 @@ function App() {
         }
     }
 
-    const fetchExchangeRate = () => {
-        setLoadingRate(true)
-        const options = {method: 'GET', headers: {accept: 'application/json'}};
-        fetch(`https://v6.exchangerate-api.com/v6/${import.meta.env.VITE_EXCHANGE_RATES_API_KEY}/pair/${selectedCurrency}/${baseCurrency}`, options)
-            .then(response => response.json())
-            .then(data => {
-                if (data?.conversion_rate) {
-                    setExchangeRate(1 / data?.conversion_rate)
-                }
-            })
-            .catch(() => {
-                console.error('Failed to fetch exchange rate')
-            })
-            .finally(() => setLoadingRate(false))
-    }
-
     const totalBudget = itinerary.reduce((acc, curr) => acc + curr.budget, 0);
     const totalExpenses = Object.values(expenses).reduce((a, b) => a + b, 0);
     const remainingBudget = totalExpenses - totalBudget;
-    const convertToCurrency = (ntd: number) => (ntd * exchangeRate).toFixed(2);
+    const convertToCurrency = (ntd: number) => rate === null ? '—' : (ntd / rate).toFixed(2);
     useDayPlanNotification(itinerary)
 
     useEffect(() => {
@@ -208,7 +193,6 @@ function App() {
     }, [itinerary]);
 
     useEffect(() => {
-        // fetchExchangeRate();
         localStorage.setItem('preferedCurrency', selectedCurrency)
         localStorage.setItem('baseCurrency', baseCurrency)
     }, [selectedCurrency, baseCurrency])
@@ -617,23 +601,24 @@ return (
                               ))
                               }
                           </select>
-                          <Button onClick={fetchExchangeRate}>{loadingRate ? '...' : "🔁"}</Button>
+                          <Button onClick={fetchExchangeRate} isDisabled={loadingRate} aria-busy={loadingRate} aria-label="Actualiser le taux de change">{loadingRate ? '...' : "🔁"}</Button>
                       </div>
                   </div>
+                  <p role="status" aria-live="polite" className="text-xs text-gray-600 dark:text-gray-300">{rateMessage}</p>
                   <div>
-                      <p className="text-xs text-gray-500">1 {selectedCurrency} ≈ {(1 / exchangeRate).toFixed(4)} {baseCurrency}</p>
+                      <p className="text-xs text-gray-500">1 {selectedCurrency} ≈ {rate === null ? '—' : rate.toFixed(4)} {baseCurrency}</p>
                       <div className="flex gap-2">
                           <Input type="number" placeholder={`Montant en ${selectedCurrency}`} value={currencyValue} onChange={e => setCurrencyValue(e.target.value)} />
                       </div>
-                      {currencyValue && <p className="text-sm mt-1">≈ {(parseFloat(currencyValue) * (1 / exchangeRate)).toFixed(2)} {baseCurrency}</p>}
+                      {currencyValue && <p className="text-sm mt-1">≈ {rate === null ? '—' : (parseFloat(currencyValue) * rate).toFixed(2)} {baseCurrency}</p>}
                   </div>
 
                   <div>
-                      <p className="text-xs text-gray-500">1 {baseCurrency} ≈ {exchangeRate.toFixed(4)} {selectedCurrency}</p>
+                      <p className="text-xs text-gray-500">1 {baseCurrency} ≈ {rate === null ? '—' : (1 / rate).toFixed(4)} {selectedCurrency}</p>
                       <div className="flex gap-2">
                           <Input type="number" placeholder={`Montant en ${baseCurrency}`} value={ntdValue} onChange={e => setNtdValue(e.target.value)} />
                       </div>
-                      {ntdValue && <p className="text-sm mt-1">≈ {(parseFloat(ntdValue) * exchangeRate).toFixed(2)} {selectedCurrency}</p>}
+                      {ntdValue && <p className="text-sm mt-1">≈ {rate === null ? '—' : (parseFloat(ntdValue) / rate).toFixed(2)} {selectedCurrency}</p>}
                   </div>
               </CardContent>
           </Card>
