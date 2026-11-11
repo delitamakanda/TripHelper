@@ -50,21 +50,8 @@ export default defineConfig({
               display: "standalone",
               orientation: "portrait"
           },
-          workbox: {
-              runtimeCaching: [
-                  {
-                      urlPattern: /^https:\/\/api\.fastforex\.io\/.*/i,
-                      handler: 'NetworkFirst',
-                      options: {
-                          cacheName: 'api-cache',
-                          expiration: {
-                              maxEntries: 10,
-                              maxAgeSeconds: 60 * 60 * 24
-                          },
-                      },
-                  }
-              ]
-          }
+          // Pas de cache Workbox pour les taux de change : la clé d'API est dans l'URL,
+          // le dernier taux connu par paire est conservé dans localStorage (src/utils/exchangeRate.ts).
       }),
   ],
     resolve: {
