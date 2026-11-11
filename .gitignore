@@ -45,3 +45,5 @@ app-release-*
 
 # Agents (workflow agentique)
 .agent-out/
+.env
+.env.local
