@@ -1,4 +1,5 @@
 import Dexie, {type Table } from 'dexie'
+import { normalizeUpdatedAt } from './lib/sync-merge.ts'
 
 export interface ChecklistItem {
     id?: string;
@@ -7,6 +8,7 @@ export interface ChecklistItem {
     checked: boolean;
     updatedAt: number;
     type?: 'item' | 'activity';
+    deleted?: boolean; // pierre tombale : supprimé, conservé pour la synchro
 }
 
 export interface ExpenseItem {
@@ -14,6 +16,7 @@ export interface ExpenseItem {
     day: string; // YYYY-MM-DD
     amount: number;
     updatedAt: number;
+    deleted?: boolean; // pierre tombale
 }
 
 function toIso(rawDate: string): string {
@@ -88,6 +91,18 @@ export class TripHelperDB extends Dexie {
                     item.day = toIso(item.day);
                 }
             })
+        })
+        // v4 : suppression logique (`deleted`) et `updatedAt` toujours numérique.
+        // Index inchangés ; `deleted` indéfini = actif.
+        this.version(4).stores({
+            checklist: 'id, day, item, type',
+            expenses: 'id, day',
+        }).upgrade(async (tx) => {
+            for (const name of ['checklist', 'expenses']) {
+                await tx.table(name).toCollection().modify((row) => {
+                    row.updatedAt = normalizeUpdatedAt(row.updatedAt)
+                })
+            }
         })
     }
 }
