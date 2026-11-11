@@ -32,7 +32,7 @@ export function DateRangeCreator({ onCreate, currencyCode } : { onCreate: (days:
         const ids = output.map(item => expenseId(item.day));
         const existing = await db.expenses.bulkGet(ids);
         const expenseItems = output
-            .map((item, i) => ({ id: ids[i], day: item.day, amount: 0, updatedAt: Date.now() }))
+            .map((item, i) => ({ id: ids[i], day: item.day, amount: 0, budget: defaultBudget, updatedAt: Date.now() }))
             .filter((_, i) => !existing[i] || existing[i]?.deleted === true);
 
         await db.expenses.bulkPut(expenseItems);

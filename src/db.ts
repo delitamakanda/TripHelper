@@ -15,6 +15,7 @@ export interface ExpenseItem {
     id?: string;
     day: string; // YYYY-MM-DD
     amount: number;
+    budget?: number; // budget du jour (devise de base), synchronisé avec la ligne
     updatedAt: number;
     deleted?: boolean; // pierre tombale
 }
@@ -103,6 +104,30 @@ export class TripHelperDB extends Dexie {
                     row.updatedAt = normalizeUpdatedAt(row.updatedAt)
                 })
             }
+        })
+        // v5 : champ `budget` sur les lignes `expenses` (non indexé, index inchangés).
+        // Initialisé depuis l'itinéraire du localStorage pour ne pas propager 3500 partout.
+        this.version(5).stores({
+            checklist: 'id, day, item, type',
+            expenses: 'id, day',
+        }).upgrade(async (tx) => {
+            const budgets = new Map<string, number>()
+            try {
+                const parsed: unknown = JSON.parse(localStorage.getItem('tripItinerary') ?? 'null')
+                if (Array.isArray(parsed)) {
+                    for (const d of parsed) {
+                        if (d && typeof d.day === 'string' && typeof d.budget === 'number' && Number.isFinite(d.budget) && d.budget >= 0) {
+                            budgets.set(d.day, d.budget)
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Error parsing trip itinerary:', e)
+            }
+            await tx.table('expenses').toCollection().modify((row) => {
+                const budget = budgets.get(row.day)
+                if (budget !== undefined && row.budget === undefined) row.budget = budget
+            })
         })
     }
 }
