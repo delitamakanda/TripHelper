@@ -29,6 +29,8 @@ export interface ChecklistRow extends SyncRow {
 export interface ExpenseRow extends SyncRow {
     day: string
     amount: number
+    /** Budget du jour (devise de base) ; absent des anciennes lignes / anciens exports. */
+    budget?: number
 }
 
 /** Une pierre tombale Firestore peut être purgée au bout de 30 jours (non appliqué automatiquement). */
@@ -154,8 +156,16 @@ export function parseCloudExpense(id: string, data: unknown): ExpenseRow | null 
         amount: Number.isFinite(amount) ? amount : 0,
         updatedAt: normalizeUpdatedAt(data.updatedAt ?? data.updateAt),
     }
+    const budget = parseBudget(data.budget)
+    if (budget !== undefined) row.budget = budget
     if (data.deleted === true) row.deleted = true
     return row
+}
+
+/** Budget valide (nombre fini ≥ 0), sinon `undefined`. */
+export function parseBudget(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined
+    return value
 }
 
 export const isLive = (row: { deleted?: boolean }): boolean => row.deleted !== true
@@ -184,6 +194,36 @@ export function groupExpenses(rows: ExpenseRow[]): Record<string, number> {
     return out
 }
 
+/** Dernière ligne `expenses` de chaque jour (la plus récente gagne, suppression comprise). */
+function bestExpenseByDay(rows: ExpenseRow[]): Map<string, ExpenseRow> {
+    const best = new Map<string, ExpenseRow>()
+    for (const row of rows) {
+        const cur = best.get(row.day)
+        if (!cur || compareVersions(row, cur) > 0) best.set(row.day, row)
+    }
+    return best
+}
+
+/**
+ * Pierres tombales d'un jour supprimé : toutes les lignes `checklist` du jour
+ * et ses lignes `expenses` (la ligne canonique est créée si absente), datées de `ts`.
+ * Aucune ligne d'un autre jour.
+ */
+export function planDayDeletion(
+    day: string,
+    checklist: ChecklistRow[],
+    expenses: ExpenseRow[],
+    ts: number,
+): { checklist: ChecklistRow[]; expenses: ExpenseRow[] } {
+    const dayExpenses = expenses.filter(r => r.day === day)
+    const canonical = expenseId(day)
+    if (!dayExpenses.some(r => r.id === canonical)) dayExpenses.push({ id: canonical, day, amount: 0, updatedAt: 0 })
+    return {
+        checklist: checklist.filter(r => r.day === day).map(r => makeTombstone(r, ts)),
+        expenses: dayExpenses.map(r => makeTombstone(r, ts)),
+    }
+}
+
 /** Reconstruit l'itinéraire à partir des lignes locales, en retirant ce qui a été supprimé. */
 export function applyRowsToItinerary(prev: DayPlan[], checklist: ChecklistRow[], expenses: ExpenseRow[]): DayPlan[] {
     const byDay: Record<string, { activities: string[]; items: string[] }> = {}
@@ -206,10 +246,19 @@ export function applyRowsToItinerary(prev: DayPlan[], checklist: ChecklistRow[],
         }
     }
 
-    const next = [...prev]
-    const existing = new Set(prev.map(e => e.day))
+    // un jour dont la ligne `expenses` la plus récente est une pierre tombale est supprimé
+    const bestExpenses = bestExpenseByDay(expenses)
+    const removedDays = new Set<string>()
+    for (const [day, best] of bestExpenses) if (!isLive(best)) removedDays.add(day)
+    const budgetOf = (day: string): number | undefined => {
+        const best = bestExpenses.get(day)
+        return best && isLive(best) ? parseBudget(best.budget) : undefined
+    }
+
+    const next = prev.filter(e => !removedDays.has(e.day))
+    const existing = new Set(next.map(e => e.day))
     for (const day of Object.keys(byDay)) {
-        if (!existing.has(day)) next.push({ day, activities: byDay[day].activities, items: byDay[day].items, budget: 3500 })
+        if (!existing.has(day) && !removedDays.has(day)) next.push({ day, activities: byDay[day].activities, items: byDay[day].items, budget: budgetOf(day) ?? 3500 })
     }
     next.sort((a, b) => a.day.localeCompare(b.day))
 
@@ -219,6 +268,7 @@ export function applyRowsToItinerary(prev: DayPlan[], checklist: ChecklistRow[],
         const items = bucket && bucket.items.length > 0 ? bucket.items : entry.items
         return {
             ...entry,
+            budget: budgetOf(entry.day) ?? entry.budget,
             activities: activities.filter(a => !deletedIds.has(checklistId(entry.day, a))),
             items: items.filter(i => !deletedIds.has(checklistId(entry.day, i))),
         }
@@ -259,7 +309,11 @@ export function planImport(
             if (!isRecord(raw) || typeof raw.day !== 'string' || raw.deleted === true) continue
             const id = typeof raw.id === 'string' && raw.id !== '' ? raw.id : expenseId(raw.day)
             const amount = Number(raw.amount)
-            imported.set(id, { id, day: raw.day, amount: Number.isFinite(amount) ? amount : 0, updatedAt: now })
+            const row: ExpenseRow = { id, day: raw.day, amount: Number.isFinite(amount) ? amount : 0, updatedAt: now }
+            // ancien export sans budget : on garde celui de la ligne locale du jour, s'il existe
+            const budget = parseBudget(raw.budget) ?? parseBudget(local.expenses.find(r => r.id === id && isLive(r))?.budget)
+            if (budget !== undefined) row.budget = budget
+            imported.set(id, row)
         }
         result.expenses.push(...imported.values())
         for (const row of local.expenses) {

@@ -11,6 +11,7 @@ import {
     mergeRows,
     parseCloudChecklist,
     parseCloudExpense,
+    planDayDeletion,
     type ChecklistRow,
     type ExpenseRow,
     type ItemType,
@@ -161,7 +162,13 @@ export function useCloudSync({ onData, getItinerary }: Options) {
                         })),
                     ...[...pushExpenses.values()].map(r => ({
                         path: `users/${uid}/expenses/${r.id}`,
-                        data: { day: r.day, amount: r.amount, updatedAt: r.updatedAt, deleted: r.deleted === true },
+                        data: {
+                            day: r.day,
+                            amount: r.amount,
+                            ...(r.budget !== undefined ? { budget: r.budget } : {}),
+                            updatedAt: r.updatedAt,
+                            deleted: r.deleted === true,
+                        },
                     })),
                 ])
                 // le reset est appliqué au cloud : on peut oublier la demande (sauf si un autre reset l'a remplacée)
@@ -247,6 +254,35 @@ export function useCloudSync({ onData, getItinerary }: Options) {
         void syncNow()
     }, [syncNow])
 
+    /** Modifie le budget d'un jour sans toucher à ses dépenses (ligne `expenses` réécrite entière, `updatedAt` à jour). */
+    const updateDayBudget = useCallback(async (day: string, budget: number) => {
+        const id = expenseId(day)
+        const existing = await db.expenses.get(id)
+        const amount = existing && existing.deleted !== true ? existing.amount : 0
+        await db.expenses.put({ id, day, amount, budget, updatedAt: Date.now() })
+        void syncNow()
+    }, [syncNow])
+
+    /** Supprime un jour : pierres tombales sur toutes ses lignes `checklist` et `expenses`, propagées à la prochaine synchro. */
+    const deleteDay = useCallback(async (day: string) => {
+        const ts = Date.now()
+        await db.transaction('rw', db.checklist, db.expenses, async () => {
+            const [checklist, expenses] = await Promise.all([
+                db.checklist.where('day').equals(day).toArray(),
+                db.expenses.where('day').equals(day).toArray(),
+            ])
+            const plan = planDayDeletion(
+                day,
+                checklist.map(r => ({ ...r, id: r.id ?? checklistId(r.day, r.item) })),
+                expenses.map(r => ({ ...r, id: r.id ?? expenseId(r.day) })),
+                ts,
+            )
+            await db.checklist.bulkPut(plan.checklist)
+            await db.expenses.bulkPut(plan.expenses)
+        })
+        void syncNow()
+    }, [syncNow])
+
     /** Reset : pierres tombales locales, et mise en attente de celles du cloud (appliquées dès que possible). */
     const resetData = useCallback(async () => {
         const ts = Date.now()
@@ -259,5 +295,5 @@ export function useCloudSync({ onData, getItinerary }: Options) {
         void syncNow()
     }, [syncNow])
 
-    return { uid, syncStatus, syncMessage, syncNow, deleteChecklistEntry, resetData }
+    return { uid, syncStatus, syncMessage, syncNow, deleteChecklistEntry, resetData, updateDayBudget, deleteDay }
 }

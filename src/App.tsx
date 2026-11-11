@@ -17,6 +17,8 @@ import { useExchangeRate } from './hooks/use-exchange-rate';
 import { useDayPlanNotification } from './hooks/use-dayplan-notifications';
 import RoutePlanner from "./components/route-planner/RoutePlanner";
 import { loadItinerary } from './utils/itinerary-storage'
+import { DayBudgetEditor } from './components/day-budget-editor/DayBudgetEditor'
+import { describeDayDeletion } from './utils/day-budget'
 
 const fs = firestore;
 
@@ -89,7 +91,7 @@ function App() {
         setExpenses(groupExpenses(expenseRows))
         setItinerary(prev => applyRowsToItinerary(prev, checklistRows, expenseRows))
     }, [])
-    const { uid, syncStatus, syncMessage, syncNow, deleteChecklistEntry, resetData } = useCloudSync({
+    const { uid, syncStatus, syncMessage, syncNow, deleteChecklistEntry, resetData, updateDayBudget, deleteDay } = useCloudSync({
         onData: handleCloudData,
         getItinerary: () => itineraryRef.current,
     })
@@ -180,6 +182,7 @@ function App() {
                 batch.set(doc(fs, `users/${uid}/expenses/${expenseId}`), {
                     day: day.day,
                     amount: expenses[day.day] || 0,
+                    budget: day.budget,
                     updatedAt: now
                 }, { merge: true })
             }
@@ -255,6 +258,8 @@ function App() {
         const { checklist, expenses } = await loadLocalRows();
         setChecked(groupChecked(checklist));
         setExpenses(groupExpenses(expenses));
+        // jours et budgets du fichier (et jours absents du fichier retirés)
+        setItinerary(prev => applyRowsToItinerary(prev, checklist, expenses));
         void syncNow();
     };
 
@@ -278,8 +283,29 @@ function App() {
     const handleExpenseChange = async (day: string, val: number) => {
         const amount = +val || 0;
         const id = btoa(encodeURIComponent(`${day}`))
-        await db.expenses.put({id, day, amount, updatedAt: Date.now() })
+        // on conserve le budget de la ligne (ou, à défaut, celui de la carte)
+        const existing = await db.expenses.get(id)
+        const budget = existing && existing.deleted !== true ? existing.budget : undefined
+        await db.expenses.put({id, day, amount, budget: budget ?? itineraryRef.current.find(e => e.day === day)?.budget, updatedAt: Date.now() })
         setExpenses(prev => ({...prev, [day]: amount }))
+    }
+
+    const handleBudgetChange = async (day: string, budget: number) => {
+        setItinerary(prev => prev.map(entry => entry.day === day ? { ...entry, budget } : entry))
+        await updateDayBudget(day, budget)
+    }
+
+    const handleDeleteDay = async (day: string) => {
+        const entry = itinerary.find(e => e.day === day)
+        if (!entry) return
+        const confirmDelete = window.confirm(describeDayDeletion(formatDayLabel(day), entry.activities.length, entry.items.length, expenses[day] || 0, baseCurrency))
+        if (!confirmDelete) return
+        setItinerary(prev => prev.filter(e => e.day !== day))
+        setChecked(prev => Object.fromEntries(Object.entries(prev).filter(([d]) => d !== day)))
+        setExpenses(prev => Object.fromEntries(Object.entries(prev).filter(([d]) => d !== day)))
+        setNewActivity(prev => Object.fromEntries(Object.entries(prev).filter(([d]) => d !== day)))
+        setNewItem(prev => Object.fromEntries(Object.entries(prev).filter(([d]) => d !== day)))
+        await deleteDay(day)
     }
 
     const handleAddActivity = async (day: string) => {
@@ -433,7 +459,8 @@ return (
                       </div>
 
                       <div className="space-y-1">
-                          <p className="text-sm text-gray-500 mt-2">💰 Budget : <strong>{formatCurrencySymbol(+budget, baseCurrency, navigator.language)}</strong> (~{convertToCurrency(budget)} {selectedCurrency})</p>
+                          <DayBudgetEditor budget={budget} currencyCode={baseCurrency} onCommit={value => handleBudgetChange(day, value)} />
+                          <p className="text-sm text-gray-500 dark:text-gray-400">Budget : <strong>{formatCurrencySymbol(+budget, baseCurrency, navigator.language)}</strong> (~{convertToCurrency(budget)} {selectedCurrency})</p>
                           <label>Dépenses ({baseCurrency})</label>
                           <input type="number" value={expenses[day] || ""} onChange={e => handleExpenseChange(day, +e.target.value)} />
                           <p className="text-xs text-gray-600">
@@ -441,6 +468,11 @@ return (
                           </p>
 
                       </div>
+                      <Button
+                          onClick={() => handleDeleteDay(day)}
+                          aria-label={`Supprimer le jour ${formatDayLabel(day)}`}
+                          className="min-h-11 rounded border border-red-700 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 dark:border-red-400 dark:text-red-400 dark:hover:bg-red-950"
+                      >Supprimer ce jour</Button>
                   </CardContent>
               </Card>
           ))}
