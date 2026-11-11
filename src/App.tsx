@@ -14,6 +14,7 @@ import PWAInstallPrompt from "./components/pwa-install-prompt/PWAInstallPrompt.t
 import ToggleTheme from "./components/toggle-theme/ToggleTheme.tsx";
 import { useDayPlanNotification } from './hooks/use-dayplan-notifications';
 import RoutePlanner from "./components/route-planner/RoutePlanner";
+import { loadItinerary } from './utils/itinerary-storage'
 
 const fs = firestore;
 
@@ -67,7 +68,7 @@ const initialItinerary = import.meta.env.DEV ? [
 function App() {
     const [checked, setChecked] = useState<Record<string, string[]>>({})
     const [expenses, setExpenses] = useState<Record<string, number>>({})
-    const [itinerary, setItinerary] = useState(initialItinerary)
+    const [itinerary, setItinerary] = useState(() => loadItinerary(initialItinerary))
     const [newItem, setNewItem] = useState<Record<string, string>>({})
     const [newActivity, setNewActivity] = useState<Record<string, string>>({})
     const [ntdValue, setNtdValue] = useState<string>("")
