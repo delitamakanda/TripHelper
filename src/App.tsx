@@ -10,7 +10,7 @@ import { saveAs } from 'file-saver'
 import {firestore } from "./lib/firebase";
 import { doc, writeBatch } from 'firebase/firestore';
 import { useCloudSync, loadLocalRows } from './hooks/use-cloud-sync';
-import { applyRowsToItinerary, groupChecked, groupExpenses, isLive, planImport, type ChecklistRow, type ExpenseRow } from './lib/sync-merge';
+import { applyRowsToItinerary, checklistId, groupChecked, groupExpenses, isLive, planImport, type ChecklistRow, type ExpenseRow } from './lib/sync-merge';
 import PWAInstallPrompt from "./components/pwa-install-prompt/PWAInstallPrompt.tsx";
 import ToggleTheme from "./components/toggle-theme/ToggleTheme.tsx";
 import { useExchangeRate } from './hooks/use-exchange-rate';
@@ -19,6 +19,8 @@ import RoutePlanner from "./components/route-planner/RoutePlanner";
 import { loadItinerary } from './utils/itinerary-storage'
 import { DayBudgetEditor } from './components/day-budget-editor/DayBudgetEditor'
 import { describeDayDeletion } from './utils/day-budget'
+import { validateNewEntry } from './utils/checklist-input'
+import { AddEntryField } from './components/add-entry-field/AddEntryField'
 
 const fs = firestore;
 
@@ -308,12 +310,21 @@ function App() {
         await deleteDay(day)
     }
 
-    const handleAddActivity = async (day: string) => {
-        if (!newActivity[day]) return;
-        setItinerary(prev => prev.map(entry => entry.day === day? {...entry, activities: [...entry.activities, newActivity[day]] } : entry))
-        const id = btoa(encodeURIComponent(`${day}|${newActivity[day]}`))
-        await db.checklist.put({ id, day, item: newActivity[day], checked: false, type: 'activity', updatedAt: Date.now() })
-        setNewActivity(prev => ({...prev, [day]: '' }));
+    const addEntry = (day: string, raw: string, type: 'activity' | 'item'): string | null => {
+        const entry = itinerary.find(e => e.day === day)
+        const own = (type === 'activity' ? entry?.activities : entry?.items) ?? []
+        const other = (type === 'activity' ? entry?.items : entry?.activities) ?? []
+        const sameList = type === 'activity' ? 'Cette activité existe déjà ce jour-là.' : 'Cet objet est déjà dans la liste de ce jour.'
+        const otherList = type === 'activity' ? 'Un objet à emporter porte déjà ce nom ce jour-là.' : 'Une activité porte déjà ce nom ce jour-là.'
+        const result = validateNewEntry(raw, own)
+        if (!result.ok) return result.error === 'empty' ? 'Saisissez un texte avant d\'ajouter.' : sameList
+        if (!validateNewEntry(raw, other).ok) return otherList
+        const value = result.value
+        setItinerary(prev => prev.map(e => e.day === day ? (type === 'activity' ? {...e, activities: [...e.activities, value]} : {...e, items: [...e.items, value]}) : e))
+        if (type === 'activity') setNewActivity(prev => ({...prev, [day]: '' }))
+        else setNewItem(prev => ({...prev, [day]: '' }))
+        void db.checklist.put({ id: checklistId(day, value), day, item: value, checked: false, type, updatedAt: Date.now() })
+        return null
     }
 
     const handleDeleteActivity = async (day: string, index: number) => {
@@ -324,14 +335,6 @@ function App() {
         setItinerary(prev => prev.map(entry => entry.day === day? {...entry, activities: entry.activities.filter((_, i) => i!== index) } : entry))
         // pierre tombale locale, propagée au cloud dès que la synchro est possible
         await deleteChecklistEntry(day, activityToDelete, 'activity');
-    }
-
-    const handleAddItem =  async (day: string) => {
-        if (!newItem[day]) return;
-        setItinerary(prev => prev.map(entry => entry.day === day? {...entry, items: [...entry.items, newItem[day]] } : entry))
-        setNewItem(prev => ({...prev, [day]: '' }));
-        const id = btoa(encodeURIComponent(`${day}|${newItem[day]}`))
-        await db.checklist.put({ id, day, item: newItem[day], checked: false, type: 'item', updatedAt: Date.now() })
     }
 
     const handleDeleteItem =  async (day: string, item: string | number, idx: number) => {
@@ -433,10 +436,7 @@ return (
                                   </li>
                               ))}
                           </ul>
-                          <div className="flex gap-2 mt-2">
-                              <Input placeholder="Nouvelle activité" value={newActivity[day] || ""} onChange={e => setNewActivity(prev => ({ ...prev, [day]: e.target.value }))} />
-                              <Button onClick={() => handleAddActivity(day)}>➕</Button>
-                          </div>
+                          <AddEntryField placeholder="Nouvelle activité" addLabel="Ajouter une activité" value={newActivity[day] || ""} onChange={v => setNewActivity(prev => ({ ...prev, [day]: v }))} onSubmit={raw => addEntry(day, raw, 'activity')} />
                       </div>
                       <div>
                           <p className="font-medium text-sm">À emporter :</p>
@@ -452,10 +452,7 @@ return (
                                   </li>
                               ))}
                           </ul>
-                          <div className="flex gap-2 mt-2">
-                              <Input placeholder="Nouvel objet à emporter" value={newItem[day] || ""} onChange={e => setNewItem(prev => ({ ...prev, [day]: e.target.value }))} />
-                              <Button onClick={() => handleAddItem(day)}>➕</Button>
-                          </div>
+                          <AddEntryField placeholder="Nouvel objet à emporter" addLabel="Ajouter un objet" value={newItem[day] || ""} onChange={v => setNewItem(prev => ({ ...prev, [day]: v }))} onSubmit={raw => addEntry(day, raw, 'item')} />
                       </div>
 
                       <div className="space-y-1">
